@@ -236,8 +236,8 @@ mod tests {
     #[test]
     fn profitable_cycle_passes() {
         let simulator = LocalSimulator::new(SimConfig { min_profit_usd: 1.0, ..Default::default() });
-        let buy = pool(PoolKind::ConstantProduct, 1_000_000_000, 1_000_000_000);
-        let sell = pool(PoolKind::ConstantProduct, 1_000_000_000, 1_020_000_000);
+        let buy = pool(PoolKind::ConstantProduct, 1_000_000_000, 1_020_000_000);
+        let sell = pool(PoolKind::ConstantProduct, 1_020_000_000, 1_000_000_000);
         let outcome = simulator.simulate_route(
             ChainId::MAINNET,
             TradeKind::Cycle,

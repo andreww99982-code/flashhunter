@@ -115,6 +115,7 @@ pub fn suggest_max_fee(block_base_fee_wei: u128, priority_fee_wei: u128, bump_pc
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fh_shared::gwei_to_wei;
     use fh_shared::Address;
 
     struct FakeProvider {
