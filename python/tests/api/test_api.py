@@ -35,8 +35,11 @@ def test_runtime_config_api_lists_fields_without_revealing_secrets(api_client) -
     fields = {field["name"]: field for field in response.json()["fields"]}
     assert fields["eth_rpc_http"]["kind"] == "secret"
     assert fields["eth_rpc_http"]["value"] is None
+    assert fields["eth_rpc_fallbacks"]["kind"] == "secret"
     assert "keeper_private_key" in fields
     assert "risk_daily_loss_limit_usd" in fields
+    locked = {field["name"]: field for field in response.json()["locked_fields"]}
+    assert locked["mock_market_data"]["reason"].startswith("Отключено")
 
 
 def test_runtime_config_api_validates_values(api_client) -> None:
@@ -45,6 +48,9 @@ def test_runtime_config_api_validates_values(api_client) -> None:
 
     unsupported = api_client.put(f"{API}/settings/config", json={"values": {"jwt_secret": "must-not-be-editable-here"}})
     assert unsupported.status_code == 422
+
+    mock_market = api_client.put(f"{API}/settings/config", json={"values": {"mock_market_data": True}})
+    assert mock_market.status_code == 422
 
 
 def test_metrics_endpoint_is_prometheus_text(api_client) -> None:

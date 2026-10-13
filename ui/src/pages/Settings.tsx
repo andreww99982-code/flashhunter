@@ -43,7 +43,11 @@ const EDITABLE: { key: string; label: string; hint: string }[] = [
 
 export function SettingsPage() {
   const { data, refetch } = useApi<SettingsResponse>('/settings', 12000);
-  const runtimeConfig = useApi<{ fields: RuntimeConfigField[]; overrides: string[] }>('/settings/config', 30000);
+  const runtimeConfig = useApi<{
+    fields: RuntimeConfigField[];
+    locked_fields: { name: string; label: string; category: string; reason: string }[];
+    overrides: string[];
+  }>('/settings/config', 30000);
   const { user, refresh } = useAuth();
   const { push } = useToast();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -305,7 +309,7 @@ export function SettingsPage() {
               <summary className="cursor-pointer text-sm font-semibold">{category} <span className="text-xs text-[var(--text-3)]">({fields.length})</span></summary>
               <div className="mt-4 grid gap-4 md:grid-cols-2">
                 {fields.map((field) => {
-                  const edited = Object.hasOwn(configDrafts, field.name);
+                  const edited = Object.prototype.hasOwnProperty.call(configDrafts, field.name);
                   const value = edited ? configDrafts[field.name] : field.value;
                   return (
                     <div key={field.name} className="min-w-0">
@@ -372,6 +376,20 @@ export function SettingsPage() {
           ))}
         </div>
       </GlassCard>
+
+      {(runtimeConfig.data?.locked_fields.length ?? 0) > 0 && (
+        <GlassCard title="Параметры первичной настройки" subtitle="Их нужно задавать через .env до запуска сервиса">
+          <p className="mb-3 text-xs text-[var(--text-3)]">
+            Инфраструктурные параметры задаются до запуска; значения секретов не показываются.
+            Имитация рынка отключена: используются только реальные рыночные данные.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {runtimeConfig.data?.locked_fields.map((field) => (
+              <span key={field.name} className="pill" title={`${field.category}: ${field.reason}`}>{field.label}</span>
+            ))}
+          </div>
+        </GlassCard>
+      )}
 
       <GlassCard
         title="API-ключи внешних сервисов"

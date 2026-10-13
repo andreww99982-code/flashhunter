@@ -172,9 +172,14 @@ export function Wallets() {
                   className="btn btn-filled"
                   onClick={async () => {
                     try {
+                      const chains = newWallet.chain_scope.split(',').map((chain) => chain.trim());
+                      if (!chains.length || chains.some((chain) => !/^\d+$/.test(chain) || Number(chain) < 1)) {
+                        push('error', 'Укажите корректные ID сетей через запятую');
+                        return;
+                      }
                       await api.post('/wallets', {
                         ...newWallet,
-                        chain_scope: newWallet.chain_scope.split(',').map((chain) => Number(chain.trim())).filter(Number.isInteger),
+                        chain_scope: chains.map(Number),
                       });
                       push('success', 'Кошелёк добавлен');
                       setCreating(false);

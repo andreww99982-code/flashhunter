@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from decimal import Decimal
-from typing import Any
+from typing import Any, get_args, get_origin, Literal
 
+from eth_account import Account
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field, SecretStr
 from sqlalchemy import select
@@ -19,6 +21,7 @@ from flashhunter.db.models import utcnow
 from flashhunter.strategies.service import STRATEGY_CLASSES
 
 router = APIRouter(prefix="/settings", tags=["settings"])
+log = logging.getLogger(__name__)
 
 DRY_RUN_MIN_HOURS = 24  # ТЗ: обязательный dry-run 24 часа до переключения в live
 
@@ -63,7 +66,16 @@ def _config_secret(name: str, field: Any) -> bool:
     annotation = field.annotation
     return annotation is SecretStr or any(
         marker in name.lower()
-        for marker in ("password", "secret", "private_key", "rpc_http", "rpc_ws", "relay_url", "webhook")
+        for marker in (
+            "password",
+            "secret",
+            "private_key",
+            "rpc_http",
+            "rpc_ws",
+            "rpc_fallback",
+            "relay_url",
+            "webhook",
+        )
     )
 
 
@@ -71,11 +83,11 @@ def _config_kind(field: Any) -> str:
     annotation = field.annotation
     if annotation is bool:
         return "boolean"
-    if annotation in (int, float):
+    if annotation in (int, float, Decimal):
         return "number"
-    if annotation is list[str] or annotation is list[int]:
+    if get_origin(annotation) is list:
         return "list"
-    if getattr(annotation, "__origin__", None) is not None and str(annotation).startswith("typing.Literal"):
+    if get_origin(annotation) is Literal:
         return "select"
     return "text"
 
@@ -162,6 +174,7 @@ _CONFIG_EXCLUDED = {
     "nats_url",
     "jwt_secret",
     "admin_default_password",
+    "mock_market_data",
 }
 
 
@@ -187,13 +200,26 @@ async def get_runtime_config(user: CurrentUser, db: SessionDep) -> dict[str, Any
                 "value": None if secret else _field_value(value),
                 "configured": bool(masked) if secret else True,
                 "masked": mask_secret(masked) if secret and masked else None,
-                "choices": list(field.annotation.__args__)
-                if _config_kind(field) == "select" and hasattr(field.annotation, "__args__")
+                "choices": list(get_args(field.annotation))
+                if _config_kind(field) == "select"
                 else [],
                 "description": field.description or "",
             }
         )
-    return {"fields": fields, "overrides": sorted(overrides)}
+    locked_fields = [
+        {
+            "name": name,
+            "label": Settings.model_fields[name].alias or name,
+            "category": _config_category(name),
+            "reason": (
+                "Отключено: система должна использовать только реальные рыночные данные."
+                if name == "mock_market_data"
+                else "Задаётся только до запуска сервиса через .env."
+            ),
+        }
+        for name in sorted(_CONFIG_EXCLUDED)
+    ]
+    return {"fields": fields, "locked_fields": locked_fields, "overrides": sorted(overrides)}
 
 
 @router.put("/config")
@@ -238,10 +264,12 @@ async def set_trading_wallet(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "trading wallet must be hot and have a private key")
     if get_settings().live_chain_id not in (wallet.chain_scope or []):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "wallet is not enabled for the active chain")
-    from eth_account import Account
-
-    private_key = decrypt_secret(wallet.encrypted_key)
-    if Account.from_key(private_key).address.lower() != wallet.address.lower():
+    try:
+        private_key = decrypt_secret(wallet.encrypted_key)
+        derived_address = Account.from_key(private_key).address
+    except Exception as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "wallet private key is invalid") from exc
+    if derived_address.lower() != wallet.address.lower():
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "wallet address does not match its private key")
     setting = await db.get(Setting, "trading_wallet")
     if setting is None:

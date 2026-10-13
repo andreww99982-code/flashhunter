@@ -6,8 +6,9 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
+from eth_account import Account
 
 from flashhunter.api.deps import CriticalUser, CurrentUser, SessionDep, service, write_audit
 from flashhunter.config.secrets import encrypt_secret, mask_secret
@@ -23,7 +24,14 @@ class WalletCreate(BaseModel):
     address: str = Field(min_length=42, max_length=42, pattern="^0x[0-9a-fA-F]{40}$")
     private_key: str | None = Field(default=None, description="Хранится только зашифрованным")
     is_hot: bool = True
-    chain_scope: list[int] = Field(default_factory=lambda: [1])
+    chain_scope: list[int] = Field(default_factory=lambda: [1], min_length=1)
+
+    @field_validator("chain_scope")
+    @classmethod
+    def valid_chain_scope(cls, value: list[int]) -> list[int]:
+        if any(chain_id < 1 for chain_id in value):
+            raise ValueError("chain IDs must be positive")
+        return list(dict.fromkeys(value))
 
 
 class RefillRequest(BaseModel):
@@ -37,6 +45,15 @@ class SetKeyRequest(BaseModel):
     """Приватный ключ приходит телом запроса (не query-параметром, чтобы не попадать в логи URL)."""
 
     private_key: str = Field(min_length=64, max_length=66)
+
+
+def _validate_wallet_key(address: str, private_key: str) -> None:
+    try:
+        derived_address = Account.from_key(private_key).address
+    except Exception as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "invalid private key") from exc
+    if derived_address.lower() != address.lower():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "wallet address does not match its private key")
 
 
 @router.get("")
@@ -82,6 +99,8 @@ async def create_wallet(
     existing = (await db.execute(select(Wallet).where(Wallet.address == payload.address))).scalar_one_or_none()
     if existing is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "wallet with this address already exists")
+    if payload.private_key:
+        _validate_wallet_key(payload.address, payload.private_key)
     wallet = Wallet(
         name=payload.name,
         address=payload.address,
@@ -105,6 +124,7 @@ async def set_key(
     wallet = await db.get(Wallet, wallet_id)
     if wallet is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "wallet not found")
+    _validate_wallet_key(wallet.address, payload.private_key)
     wallet.encrypted_key = encrypt_secret(payload.private_key)
     await write_audit(db, request, user.username, "wallet_set_key", {"address": wallet.address})
     return {"ok": True, "masked": mask_secret(payload.private_key)}
