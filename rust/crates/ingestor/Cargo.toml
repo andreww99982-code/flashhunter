@@ -1,0 +1,19 @@
+[package]
+name = "fh-ingestor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "fh-ingestor"
+path = "src/main.rs"
+
+[dependencies]
+fh-shared = { path = "../shared" }
+fh-chain-access = { path = "../chain-access" }
+fh-pool-indexer = { path = "../pool-indexer" }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+dotenvy = { workspace = true }
+anyhow = { workspace = true }

@@ -1,0 +1,5 @@
+# Зафиксированная версия тулчейна: CI и прод-сборка используют одну и ту же
+[toolchain]
+channel = "1.82"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

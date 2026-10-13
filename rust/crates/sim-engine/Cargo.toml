@@ -1,0 +1,12 @@
+[package]
+name = "fh-sim-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+fh-shared = { path = "../shared" }
+fh-pool-indexer = { path = "../pool-indexer" }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }

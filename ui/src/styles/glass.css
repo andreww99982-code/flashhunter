@@ -1,0 +1,393 @@
+/* ============================================================================
+   FlashHunter — дизайн-система: Material Design 3 + Liquid Glass.
+   Тёмная тема по умолчанию (ТЗ п.8.3). Анимации 200–300 мс cubic-bezier(.4,0,.2,1).
+   ========================================================================== */
+
+:root {
+  /* базовые поверхности */
+  --bg-1: #0a0e27;
+  --bg-2: #1a1f3a;
+  --bg-3: #11162f;
+
+  /* акценты */
+  --accent-profit: #00ffa3;
+  --accent-loss: #ff4d6d;
+  --accent-primary: #7c5cff;
+  --accent-warn: #ffb547;
+  --accent-info: #4dc9ff;
+
+  /* стекло */
+  --glass-bg: rgba(255, 255, 255, 0.06);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-blur: 24px;
+  --glass-bg-strong: rgba(255, 255, 255, 0.09);
+
+  /* текст */
+  --text-1: #eef1ff;
+  --text-2: rgba(238, 241, 255, 0.72);
+  --text-3: rgba(238, 241, 255, 0.48);
+
+  /* геометрия и тени */
+  --radius-xl: 28px;
+  --radius-lg: 24px;
+  --radius-md: 16px;
+  --radius-sm: 12px;
+  --shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.37);
+  --shadow-pop: 0 18px 60px rgba(0, 0, 0, 0.55);
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur: 240ms;
+
+  /* M3 state layers */
+  --state-hover: rgba(255, 255, 255, 0.08);
+  --state-press: rgba(255, 255, 255, 0.14);
+  color-scheme: dark;
+}
+
+html.light {
+  --bg-1: #eef1f8;
+  --bg-2: #dfe4f3;
+  --bg-3: #ffffff;
+  --glass-bg: rgba(255, 255, 255, 0.65);
+  --glass-border: rgba(16, 20, 48, 0.12);
+  --glass-bg-strong: rgba(255, 255, 255, 0.8);
+  --text-1: #10142c;
+  --text-2: rgba(16, 20, 44, 0.72);
+  --text-3: rgba(16, 20, 44, 0.5);
+  --state-hover: rgba(16, 20, 44, 0.06);
+  --state-press: rgba(16, 20, 44, 0.12);
+  --shadow-glass: 0 8px 32px rgba(16, 20, 44, 0.12);
+  color-scheme: light;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    font-family: 'Inter', 'Inter Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    color: var(--text-1);
+    background:
+      radial-gradient(1200px 600px at 12% -10%, rgba(124, 92, 255, 0.28), transparent 60%),
+      radial-gradient(900px 500px at 100% 0%, rgba(0, 255, 163, 0.14), transparent 55%),
+      radial-gradient(800px 600px at 50% 120%, rgba(77, 201, 255, 0.12), transparent 60%),
+      linear-gradient(160deg, var(--bg-1) 0%, var(--bg-3) 45%, var(--bg-2) 100%);
+    background-attachment: fixed;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.14);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.24);
+    background-clip: content-box;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* --- Liquid Glass ------------------------------------------------------ */
+  .glass {
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-glass);
+  }
+
+  .glass-strong {
+    background: var(--glass-bg-strong);
+    backdrop-filter: blur(calc(var(--glass-blur) + 8px)) saturate(160%);
+    -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 8px)) saturate(160%);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-pop);
+  }
+
+  /* Спекулярная кромка как у «жидкого стекла» */
+  .glass-edge {
+    position: relative;
+    overflow: hidden;
+  }
+  .glass-edge::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(140deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.02) 40%, rgba(255, 255, 255, 0.25));
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  .card-hover {
+    transition:
+      transform var(--dur) var(--ease),
+      box-shadow var(--dur) var(--ease),
+      background var(--dur) var(--ease);
+  }
+  .card-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 14px 44px rgba(0, 0, 0, 0.45);
+  }
+
+  /* --- M3 кнопки --------------------------------------------------------- */
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-2 px-4 py-2 text-sm font-medium;
+    border-radius: var(--radius-sm);
+    transition:
+      background var(--dur) var(--ease),
+      transform var(--dur) var(--ease),
+      box-shadow var(--dur) var(--ease);
+    position: relative;
+    overflow: hidden;
+  }
+  .btn:active {
+    transform: scale(0.98);
+  }
+  .btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .btn-filled {
+    background: linear-gradient(135deg, var(--accent-primary), #5a3fe0);
+    color: #fff;
+    box-shadow: 0 6px 24px rgba(124, 92, 255, 0.4);
+  }
+  .btn-filled:hover:not(:disabled) {
+    box-shadow: 0 10px 32px rgba(124, 92, 255, 0.55);
+  }
+  .btn-tonal {
+    background: rgba(124, 92, 255, 0.18);
+    color: var(--text-1);
+    border: 1px solid rgba(124, 92, 255, 0.32);
+  }
+  .btn-tonal:hover:not(:disabled) {
+    background: rgba(124, 92, 255, 0.28);
+  }
+  .btn-outline {
+    background: transparent;
+    border: 1px solid var(--glass-border);
+    color: var(--text-1);
+  }
+  .btn-outline:hover:not(:disabled) {
+    background: var(--state-hover);
+  }
+  .btn-danger {
+    background: linear-gradient(135deg, var(--accent-loss), #d32b4f);
+    color: #fff;
+    box-shadow: 0 6px 24px rgba(255, 77, 109, 0.35);
+  }
+  .btn-success {
+    background: linear-gradient(135deg, #00d18a, #00ffa3);
+    color: #04241a;
+    box-shadow: 0 6px 24px rgba(0, 255, 163, 0.28);
+  }
+
+  /* --- Поля ввода (M3 outlined) ----------------------------------------- */
+  .field {
+    @apply w-full px-4 py-2.5 text-sm;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-sm);
+    color: var(--text-1);
+    transition:
+      border-color var(--dur) var(--ease),
+      background var(--dur) var(--ease),
+      box-shadow var(--dur) var(--ease);
+  }
+  .field::placeholder {
+    color: var(--text-3);
+  }
+  .field:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 4px rgba(124, 92, 255, 0.16);
+    background: rgba(255, 255, 255, 0.06);
+  }
+  select.field option {
+    background: #131735;
+    color: #eef1ff;
+  }
+
+  /* --- Таблицы ----------------------------------------------------------- */
+  .table-glass {
+    @apply w-full text-sm;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  .table-glass thead th {
+    @apply px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider;
+    color: var(--text-3);
+    border-bottom: 1px solid var(--glass-border);
+    position: sticky;
+    top: 0;
+    background: rgba(10, 14, 39, 0.55);
+    backdrop-filter: blur(12px);
+    z-index: 1;
+  }
+  html.light .table-glass thead th {
+    background: rgba(255, 255, 255, 0.7);
+  }
+  .table-glass tbody tr {
+    transition: background var(--dur) var(--ease);
+  }
+  .table-glass tbody tr:hover {
+    background: var(--state-hover);
+  }
+  .table-glass td {
+    @apply px-4 py-3;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    color: var(--text-2);
+  }
+  .table-glass td.strong {
+    color: var(--text-1);
+    font-weight: 600;
+  }
+
+  /* --- Чипы/пилюли ------------------------------------------------------- */
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium;
+    border: 1px solid var(--glass-border);
+    background: rgba(255, 255, 255, 0.05);
+  }
+  .pill-profit {
+    color: #052c1e;
+    background: var(--accent-profit);
+    border-color: transparent;
+  }
+  .pill-loss {
+    color: #2c0410;
+    background: var(--accent-loss);
+    border-color: transparent;
+  }
+  .pill-warn {
+    color: #33220a;
+    background: var(--accent-warn);
+    border-color: transparent;
+  }
+  .pill-info {
+    color: #062a3a;
+    background: var(--accent-info);
+    border-color: transparent;
+  }
+  .pill-primary {
+    color: #fff;
+    background: var(--accent-primary);
+    border-color: transparent;
+  }
+
+  /* --- Числа ------------------------------------------------------------- */
+  .num {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
+  .profit {
+    color: var(--accent-profit);
+  }
+  .loss {
+    color: var(--accent-loss);
+  }
+
+  /* --- Индикатор живого статуса ----------------------------------------- */
+  .live-dot {
+    @apply relative inline-block h-2 w-2 rounded-full;
+    background: var(--accent-profit);
+  }
+  .live-dot::after {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    border-radius: 999px;
+    border: 2px solid var(--accent-profit);
+    animation: pulse-ring 2s var(--ease) infinite;
+  }
+
+  /* --- Скелетоны --------------------------------------------------------- */
+  .skeleton {
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.05));
+    background-size: 200% 100%;
+    animation: shimmer 1.4s linear infinite;
+    border-radius: var(--radius-sm);
+  }
+
+  .grid-cards {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+
+  .page-enter {
+    animation: slide-up 260ms var(--ease) both;
+  }
+
+  .banner-dryrun {
+    background: linear-gradient(90deg, rgba(255, 181, 71, 0.22), rgba(255, 181, 71, 0.06));
+    border: 1px solid rgba(255, 181, 71, 0.45);
+    color: #ffd79a;
+  }
+}
+
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.8;
+  }
+  70% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

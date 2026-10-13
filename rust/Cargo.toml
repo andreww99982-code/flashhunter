@@ -1,0 +1,36 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/shared",
+    "crates/chain-access",
+    "crates/ingestor",
+    "crates/pool-indexer",
+    "crates/graph-engine",
+    "crates/sim-engine",
+    "crates/bundle-builder",
+    "crates/relay-client",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["FlashHunter Team"]
+rust-version = "1.79"
+
+[workspace.dependencies]
+tokio = { version = "1.40", features = ["rt-multi-thread", "macros", "time", "sync", "signal"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+async-trait = "0.1"
+futures = "0.3"
+dotenvy = "0.15"
+hex = "0.4"
+
+# EVM-слой (используется chain-access, sim-engine, bundle-builder)
+alloy = { version = "0.8", features = ["providers", "rpc-types", "signers", "signer-local", "contract", "network"] }
+revm = { version = "19.0", features = ["std", "serde"] }
