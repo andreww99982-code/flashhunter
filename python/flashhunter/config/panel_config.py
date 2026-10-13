@@ -7,7 +7,7 @@ import os
 import tempfile
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 
 def settings_file_path() -> Path:
@@ -23,9 +23,12 @@ def load_panel_settings() -> dict[str, Any]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {}
-    if not isinstance(payload, dict) or not isinstance(payload.get("values", {}), dict):
+    if not isinstance(payload, dict):
         raise ValueError(f"invalid settings file: {path}")
-    return payload.get("values", {})
+    values = payload.get("values", {})
+    if not isinstance(values, dict):
+        raise ValueError(f"invalid settings file: {path}")
+    return cast(dict[str, Any], values)
 
 
 def save_panel_settings(values: dict[str, Any]) -> None:
