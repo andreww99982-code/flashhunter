@@ -1,0 +1,49 @@
+# Резервное копирование: дамп Postgres и снапшот конфигураций раз в 6 часов.
+# Хранится в объектном хранилище (S3-совместимом), ключи — из Secret.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: flashhunter-backup
+  namespace: flashhunter
+spec:
+  schedule: "15 */6 * * *"
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: pg-dump
+              image: postgres:16-alpine
+              command:
+                - sh
+                - -c
+                - |
+                  set -euo pipefail
+                  STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+                  FILE="/tmp/flashhunter-${STAMP}.dump"
+                  # 1. Дамп транзакционной базы (сделки, лимиты, аудит) — для восстановления
+                  pg_dump --format=custom --no-owner --dbname="$PG_DSN" --file="$FILE"
+                  # 2. Загрузка в объектное хранилище с шифрованием на стороне бакета
+                  aws s3 cp "$FILE" "s3://${BACKUP_BUCKET:-flashhunter-backups}/postgres/${STAMP}.dump" \
+                    --sse AES256 --only-show-errors
+                  # 3. Ротация на стороне бакета: жизненный цикл 90 дней (см. terraform)
+                  echo "backup uploaded: ${STAMP}"
+              env:
+                - name: PG_DSN
+                  valueFrom: { secretKeyRef: { name: flashhunter-secrets, key: POSTGRES_DSN } }
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom: { secretKeyRef: { name: flashhunter-secrets, key: BACKUP_AWS_KEY_ID } }
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom: { secretKeyRef: { name: flashhunter-secrets, key: BACKUP_AWS_SECRET } }
+              resources:
+                requests: { cpu: "200m", memory: "256Mi" }
+                limits: { cpu: "1", memory: "1Gi" }

@@ -1,0 +1,22 @@
+# Пример зашифрованного хранилища секретов. Создать так:
+#   ansible-vault create group_vars/all/vault.yml
+# и вставить туда содержимое ниже с реальными значениями.
+# Файл .vault_pass НИКОГДА не коммитится (см. .gitignore).
+
+vault_jwt_secret: "REPLACE_ME_32_BYTES_RANDOM"
+vault_admin_password: "REPLACE_ME_STRONG_PASSWORD"
+
+# RPC-провайдеры (приватные ключи Alchemy/QuickNode)
+vault_eth_rpc_http: "https://eth-mainnet.g.alchemy.com/v2/REPLACE_ME"
+vault_eth_rpc_ws: "wss://eth-mainnet.g.alchemy.com/v2/REPLACE_ME"
+vault_arb_rpc_http: "https://arb-mainnet.g.alchemy.com/v2/REPLACE_ME"
+vault_base_rpc_http: "https://base-mainnet.g.alchemy.com/v2/REPLACE_ME"
+
+# Авторизация релеев
+vault_flashbots_auth_key: "REPLACE_ME"
+vault_bloxroute_auth_header: "REPLACE_ME"
+
+# Keeper-кошелёк: приватный ключ НЕ хранится в git и НЕ передаётся открытым текстом.
+# В продакшне ключ инжектируется из KMS (aws-secretsmanager) в файл с правами 0400.
+vault_keeper_key_source: "arn:aws:secretsmanager:eu-west-1:000000000000:secret:flashhunter/prod/keeper"
+vault_cold_wallet_address: "0xREPLACE_ME"

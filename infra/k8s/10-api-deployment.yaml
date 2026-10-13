@@ -1,0 +1,100 @@
+# Оркестратор + API + панель. Два реплики: одна «ведущая» (лидер через Redis-лок),
+# вторая — горячий резерв, готовая принять трафик при падении первой.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flashhunter-api
+  namespace: flashhunter
+  labels:
+    app.kubernetes.io/name: flashhunter
+    app.kubernetes.io/component: api
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0          # не поднимаем третью реплику: лидер-лок всё равно один
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: flashhunter
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: flashhunter
+        app.kubernetes.io/component: api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: flashhunter
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      imagePullSecrets:
+        - name: flashhunter-registry
+      containers:
+        - name: api
+          image: ghcr.io/flashhunter/api:0.1.0
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "uvicorn", "flashhunter.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+          ports:
+            - { name: http, containerPort: 8000 }
+          envFrom:
+            - configMapRef: { name: flashhunter-config }
+            - secretRef: { name: flashhunter-secrets }
+          env:
+            # Идентификатор инстанса нужен метрикам: видно, какая реплика обрабатывала блок
+            - name: FLASHHUNTER_INSTANCE_ID
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            # Ключи кошельков монтируются из KMS-инжектора (нет в git и в Secret)
+            - name: KEEPER_KEY_PATH
+              value: /var/run/flashhunter/keys/keeper.json
+          resources:
+            requests: { cpu: "500m", memory: "768Mi" }
+            limits: { cpu: "2", memory: "2Gi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: keys, mountPath: /var/run/flashhunter/keys, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+            - { name: reports, mountPath: /data/reports }
+          livenessProbe:
+            httpGet: { path: /api/v1/ping, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            failureThreshold: 4
+          readinessProbe:
+            httpGet: { path: /api/v1/health, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          startupProbe:
+            httpGet: { path: /api/v1/ping, port: http }
+            failureThreshold: 30
+            periodSeconds: 2
+      volumes:
+        # Эфемерный том с ключами: значение приходит из внешнего секрет-менеджера
+        - name: keys
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: flashhunter-keys
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }
+        - name: reports
+          emptyDir: { sizeLimit: 2Gi }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/component: api

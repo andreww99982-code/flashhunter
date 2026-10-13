@@ -1,0 +1,9 @@
+# Пространство имён: изолирует бота от остальных workload'ов кластера.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: flashhunter
+  labels:
+    app.kubernetes.io/name: flashhunter
+    app.kubernetes.io/part-of: flashhunter
+    pod-security.kubernetes.io/enforce: restricted   # запрет привилегированных подов

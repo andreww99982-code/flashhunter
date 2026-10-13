@@ -1,0 +1,98 @@
+---
+# Роль common: базовая защита ноды и подготовка окружения.
+# Задача роли — сделать так, чтобы даже при компрометации бота атакующий
+# не получил доступ к системе (минимум прав, аудит, изоляция).
+
+- name: Обновление кэша пакетов
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  tags: [base]
+
+- name: Установка базовых утилит
+  ansible.builtin.apt:
+    name: [curl, jq, git, htop, iotop, fail2ban, auditd, chrony, unattended-upgrades]
+    state: present
+  tags: [base]
+
+- name: Запрет входа по паролю (только SSH-ключи)
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    validate: "sshd -t -f %s"       # проверяем конфиг до применения: не блокируем себе доступ
+  loop:
+    - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication no' }
+    - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin prohibit-password' }
+    - { regexp: '^#?X11Forwarding', line: 'X11Forwarding no' }
+    - { regexp: '^#?MaxAuthTries', line: 'MaxAuthTries 4' }
+    - { regexp: '^#?AllowTcpForwarding', line: 'AllowTcpForwarding no' }
+  notify: Перезапуск sshd
+  tags: [security]
+
+- name: Настройка fail2ban (защита от перебора SSH)
+  ansible.builtin.copy:
+    dest: /etc/fail2ban/jail.d/sshd.local
+    content: |
+      [sshd]
+      enabled = true
+      maxretry = 5
+      bantime = 3600
+      findtime = 600
+    mode: "0644"
+  notify: Перезапуск fail2ban
+  tags: [security]
+
+- name: Правила аудита доступа к файлам ключей
+  ansible.builtin.copy:
+    dest: /etc/audit/rules.d/flashhunter.rules
+    content: |
+      # Любой доступ к ключам кошелька должен попадать в аудит-лог
+      -w {{ flashhunter_dir }}/secrets -p rwa -k flashhunter_keys
+      # Изменения конфигурации бота
+      -w {{ flashhunter_dir }}/.env -p rwa -k flashhunter_env
+      # Использование sudo: все привилегированные команды
+      -w /etc/sudoers -p rwa -k flashhunter_sudo
+    mode: "0640"
+  notify: Перезагрузка правил аудита
+  tags: [security]
+
+- name: Создание каталогов бота
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ flashhunter_user }}"
+    group: "{{ flashhunter_user }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ flashhunter_dir }}", mode: "0755" }
+    - { path: "{{ flashhunter_dir }}/secrets", mode: "0700" }   # ключи: только владелец
+    - { path: "{{ flashhunter_dir }}/data", mode: "0750" }
+    - { path: "/var/log/flashhunter", mode: "0755" }
+  tags: [base]
+
+- name: Ограничения ядра для низкой латентности (busy-poll, TCP fastopen)
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_set: true
+    state: present
+    reload: true
+  loop:
+    - { name: net.core.busy_poll, value: "50" }
+    - { name: net.core.busy_read, value: "50" }
+    - { name: net.core.rmem_max, value: "16777216" }
+    - { name: net.ipv4.tcp_fastopen, value: "3" }
+    - { name: net.ipv4.tcp_low_latency, value: "1" }
+    - { name: vm.swappiness, value: "1" }
+  tags: [tuning]
+
+- name: Включение автоматических обновлений безопасности
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::AutocleanInterval "7";
+    mode: "0644"
+  tags: [security]

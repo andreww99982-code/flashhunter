@@ -1,0 +1,56 @@
+#cloud-config
+# FlashHunter: первичная настройка EC2-ноды горячего пути.
+# Задача cloud-init — довести машину до состояния «готов принять деплой из Ansible»:
+# docker, unattended-upgrades, ядро с низкой латентностью планировщика, лог-ротация.
+package_update: true
+package_upgrade: true
+
+packages:
+  - docker.io
+  - docker-compose-v2
+  - git
+  - curl
+  - jq
+  - chrony              # точное время: дедлайны транзакций зависят от часов
+  - unattended-upgrades
+  - fail2ban
+  - auditd              # аудит доступа к ключам
+
+write_files:
+  # Ограничения ядра: меньше джиттера на горячем пути (сетевые прерывания обрабатывает отдельное ядро)
+  - path: /etc/sysctl.d/90-flashhunter.conf
+    content: |
+      net.core.busy_poll = 50
+      net.core.busy_read = 50
+      net.core.rmem_max = 16777216
+      net.core.wmem_max = 16777216
+      net.ipv4.tcp_low_latency = 1
+      net.ipv4.tcp_fastopen = 3
+      vm.swappiness = 1
+      kernel.numa_balancing = 0
+  # Лог-ротация docker-логов: иначе диск забьётся за неделю активной торговли
+  - path: /etc/docker/daemon.json
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": { "max-size": "20m", "max-file": "5" },
+        "live-restore": true,
+        "default-address-pools": [ { "base": "172.30.0.0/16", "size": 24 } ]
+      }
+  # Fail2ban: SSH-порты в интернете сканируют постоянно
+  - path: /etc/fail2ban/jail.d/sshd.local
+    content: |
+      [sshd]
+      enabled = true
+      maxretry = 5
+      bantime = 3600
+
+runcmd:
+  - sysctl --system
+  - systemctl restart docker
+  - systemctl enable --now fail2ban auditd chrony
+  - git clone https://github.com/flashhunter/flashhunter.git /opt/flashhunter || true
+  - mkdir -p /opt/flashhunter/data /var/log/flashhunter
+  - chown -R ubuntu:ubuntu /opt/flashhunter
+  # Никаких ключей в cloud-init: они приходят из KMS при деплое (Ansible/SSM)
+  - echo "flashhunter node ready" > /var/log/flashhunter/cloud-init.done

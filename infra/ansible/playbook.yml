@@ -1,0 +1,66 @@
+---
+# Деплой FlashHunter на ноду горячего пути.
+# Порядок ролей критичен: сначала базовая защита (common), затем docker,
+# и только потом сам бот — с проверкой здоровья после каждого шага.
+- name: "FlashHunter: подготовка ноды"
+  hosts: hotpath
+  gather_facts: true
+  serial: 1                     # по одной ноде: вторая остаётся работать
+  max_fail_percentage: 0        # любая ошибка останавливает деплой
+
+  pre_tasks:
+    - name: Проверка обязательных переменных
+      ansible.builtin.assert:
+        that:
+          - flashhunter_dir is defined
+          - flashhunter_version is defined
+        fail_msg: "Задайте flashhunter_dir и flashhunter_version (см. inventory.ini)"
+      tags: [always]
+
+    - name: Проверка свободного места на диске (нужно ≥ 10 ГБ под образы и базу)
+      ansible.builtin.assert:
+        that: ansible_mounts | selectattr('mount', 'equalto', '/') | map(attribute='size_available') | first > 10 * 1024 ** 3
+        fail_msg: "Мало места на диске: очистите образы (docker system prune) или увеличьте том"
+      tags: [always]
+
+    - name: Проверка синхронизации часов (дедлайны транзакций зависят от времени)
+      ansible.builtin.command: chronyc tracking
+      register: chrony_status
+      changed_when: false
+      failed_when: false
+      tags: [always]
+
+    - name: Предупреждение при большом расхождении часов
+      ansible.builtin.debug:
+        msg: "ВНИМАНИЕ: часы расходятся более чем на 1 секунду. Проверьте chrony до старта торговли."
+      when: chrony_status.stdout is defined and 'System time' in (chrony_status.stdout | default(''))
+      tags: [always]
+
+  roles:
+    - role: common
+      tags: [base, security]
+    - role: docker
+      tags: [docker]
+    - role: flashhunter
+      tags: [app]
+
+  post_tasks:
+    - name: Итоговый health-check API
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:8000/api/v1/health"
+        status_code: 200
+        timeout: 15
+      register: health
+      retries: 12
+      delay: 5
+      until: health.status == 200
+      tags: [verify]
+
+    - name: Отчёт о состоянии
+      ansible.builtin.debug:
+        msg: >-
+          Деплой завершён. Версия {{ flashhunter_version }},
+          статус {{ (health.json | default({})).get('status', 'unknown') }},
+          dry_run = {{ (health.json | default({})).get('dry_run', 'unknown') }},
+          обработка блоков: {{ (health.json | default({})).get('blocks_processed', 0) }}
+      tags: [verify]

@@ -1,0 +1,317 @@
+{
+  "title": "FlashHunter: PnL, латентность, релеи",
+  "uid": "flashhunter-main",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "10s",
+  "tags": [
+    "flashhunter",
+    "mev"
+  ],
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "strategy",
+        "label": "Стратегия",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "FlashHunter-Prometheus"
+        },
+        "query": "label_values(flashhunter_opportunities_total, strategy)",
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "title": "PnL, USD (день / час / всё время)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "FlashHunter-Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "flashhunter_pnl_usd{period=\"day\"}",
+          "legendFormat": "день",
+          "refId": "A"
+        },
+        {
+          "expr": "flashhunter_pnl_usd{period=\"hour\"}",
+          "legendFormat": "час",
+          "refId": "B"
+        },
+        {
+          "expr": "flashhunter_pnl_usd{period=\"total\"}",
+          "legendFormat": "всего",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "title": "Найденные возможности по стратегиям (в минуту)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "FlashHunter-Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (strategy) (rate(flashhunter_opportunities_total{strategy=~\"$strategy\"}[5m])) * 60",
+          "legendFormat": "{{strategy}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Сделки по статусам",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "FlashHunter-Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(flashhunter_executions_total[5m]))",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Латентность обработки блока (p50/p95/p99), мс",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "FlashHunter-Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum(rate(flashhunter_block_latency_seconds_bucket[5m])) by (le)) * 1000",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(flashhunter_block_latency_seconds_bucket[5m])) by (le)) * 1000",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(flashhunter_block_latency_seconds_bucket[5m])) by (le)) * 1000",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "title": "Латентность симуляции (p95), мс",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "FlashHunter-Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(flashhunter_simulation_latency_seconds_bucket[5m])) by (le)) * 1000",
+          "legendFormat": "p95 симуляции",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Релеи: принятые bundle в минуту",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "FlashHunter-Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (relay) (rate(flashhunter_relay_submissions_total{result=\"accepted\"}[5m])) * 60",
+          "legendFormat": "{{relay}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Задержка отправки в релеи (p95), мс",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "FlashHunter-Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(flashhunter_relay_latency_seconds_bucket[5m])) by (le, relay)) * 1000",
+          "legendFormat": "{{relay}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Состояние предохранителей",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "FlashHunter-Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "ВЫКЛ",
+                  "color": "green"
+                },
+                "1": {
+                  "text": "ВКЛ",
+                  "color": "red"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "flashhunter_kill_switch_active",
+          "legendFormat": "Kill-switch",
+          "refId": "A"
+        },
+        {
+          "expr": "flashhunter_dry_run_active",
+          "legendFormat": "Dry-run",
+          "refId": "B"
+        },
+        {
+          "expr": "flashhunter_service_up",
+          "legendFormat": "Оркестратор",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "title": "Расход на газ, $/мин",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "FlashHunter-Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (chain_id) (rate(flashhunter_gas_spend_usd_total[5m])) * 60",
+          "legendFormat": "chain {{chain_id}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+# FlashHunter: скрейп-конфиг Prometheus.
+# API отдаёт метрики на /metrics (см. flashhunter/api/metrics.py).
+global:
+  scrape_interval: 10s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: flashhunter
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  # API + оркестратор: метрики пайплайна, PnL, риска, латентности
+  - job_name: flashhunter-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:8000"]
+        labels:
+          service: api
+
+  # Redis (если поднят в профиле cluster): очередь событий и лаг обработки
+  - job_name: redis
+    static_configs:
+      - targets: ["redis:6379"]
+    metrics_path: /metrics
+    # redis-exporter в профиле cluster переопределяет target
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: flashhunter-redis
+
+  # Сам Prometheus: контроль «жив ли мониторинг»
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

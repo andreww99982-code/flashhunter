@@ -1,0 +1,29 @@
+# Внутренний сервис: панель открывается через Ingress, метрики скрейпит Prometheus.
+apiVersion: v1
+kind: Service
+metadata:
+  name: flashhunter-api
+  namespace: flashhunter
+  labels:
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: flashhunter
+    app.kubernetes.io/component: api
+  ports:
+    - { name: http, port: 80, targetPort: 8000 }
+---
+# Headless-сервис для прямых подключений (диагностика, отладка WS на конкретной реплике)
+apiVersion: v1
+kind: Service
+metadata:
+  name: flashhunter-api-headless
+  namespace: flashhunter
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: flashhunter
+    app.kubernetes.io/component: api
+  ports:
+    - { name: http, port: 8000, targetPort: 8000 }

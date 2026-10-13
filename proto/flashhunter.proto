@@ -1,0 +1,259 @@
+// FlashHunter: gRPC-контракты внутренней шины (Rust-сервисы ↔ Python-orchestrator).
+//
+// Зачем нужен proto, если основной канал — Redis/NATS:
+//   * строгая типизация горячего пути (блок → возможность → bundle) без JSON-парсинга;
+//   * единый источник истины для Rust и Python структур;
+//   * версионирование контрактов при обновлении сервисов по отдельности.
+//
+// Кодогенерация:
+//   python:  python -m grpc_tools.protoc -I proto --python_out=python --grpc_python_out=python proto/flashhunter.proto
+//   rust:    cargo build -p fh-proto   (см. rust/crates/*: build.rs с tonic-build)
+syntax = "proto3";
+
+package flashhunter.v1;
+
+option go_package = "github.com/flashhunter/proto/flashhunter/v1;flashhunterv1";
+
+// ---------------------------------------------------------------------------
+// Общие типы
+// ---------------------------------------------------------------------------
+
+// Идентификация сервиса в шине (используется в метриках и трассировке).
+enum ServiceKind {
+  SERVICE_KIND_UNSPECIFIED = 0;
+  SERVICE_KIND_INGESTOR = 1;
+  SERVICE_KIND_POOL_INDEXER = 2;
+  SERVICE_KIND_GRAPH_ENGINE = 3;
+  SERVICE_KIND_SIM_ENGINE = 4;
+  SERVICE_KIND_STRATEGY = 5;
+  SERVICE_KIND_BUNDLE_BUILDER = 6;
+  SERVICE_KIND_RELAY_CLIENT = 7;
+  SERVICE_KIND_RISK_ENGINE = 8;
+  SERVICE_KIND_API = 9;
+}
+
+// Событие нового блока: триггер всего горячего пути.
+message BlockEvent {
+  uint32 chain_id = 1;
+  uint64 block_number = 2;
+  string block_hash = 3;          // 0x-hex
+  uint64 timestamp = 4;           // unix seconds
+  string base_fee_wei = 5;        // uint256 как строка: JSON-числа не влезают
+  uint32 tx_count = 6;
+  uint64 observed_at_ms = 7;      // когда мы увидели блок (для метрики head lag)
+}
+
+// Состояние пула (снимок после применения событий блока).
+message PoolState {
+  uint32 chain_id = 1;
+  string address = 2;
+  string dex = 3;                 // uniswap_v2/uniswap_v3/curve/...
+  string kind = 4;                // constant_product/concentrated/stableswap
+  string token0 = 5;
+  string token1 = 6;
+  uint32 fee_bps = 7;
+  string reserve0 = 8;            // uint256 строкой
+  string reserve1 = 9;
+  double liquidity_usd = 10;
+  uint64 updated_block = 11;
+  uint64 updated_at_ms = 12;
+}
+
+// Найденная возможность (кандидат на сделку).
+message Opportunity {
+  string uid = 1;
+  ServiceKind source = 2;
+  string strategy = 3;
+  uint32 chain_id = 4;
+  uint64 block_number = 5;
+  string token_in = 6;
+  string token_out = 7;
+  string dex_buy = 8;
+  string dex_sell = 9;
+  double size_usd = 10;
+  double profit_usd = 11;
+  double net_profit_usd = 12;     // за вычетом газа и комиссии флеш-кредита
+  double gas_usd = 13;
+  double flash_fee_usd = 14;
+  double roi_pct = 15;
+  double confidence = 16;         // 0..1 — уверенность стратегии в оценке
+  repeated string route = 17;     // [token, pool, token, pool, ...]
+}
+
+// Результат локальной симуляции (revm / eth_call).
+message SimulationResult {
+  bool success = 1;
+  string output_amount = 2;       // uint256 строкой
+  uint64 gas_used = 3;
+  double net_profit_usd = 4;
+  string revert_reason = 5;       // человекочитаемая причина («Unprofitable()»)
+  uint32 latency_us = 6;
+}
+
+// Параметры сборки bundle для релея.
+message BundleRequest {
+  uint32 chain_id = 1;
+  string sender = 2;              // адрес keeper-а
+  string target = 3;              // контракт-исполнитель
+  string calldata = 4;            // 0x-hex
+  uint64 gas_limit = 5;
+  string base_fee_wei = 6;
+  string priority_fee_wei = 7;
+  uint64 nonce = 8;
+  optional uint64 target_block = 9;
+  double min_profit_usd = 10;
+}
+
+// Ответ релея на отправку bundle.
+message RelaySubmission {
+  string relay = 1;               // flashbots/bloxroute/titan/...
+  string bundle_hash = 2;
+  bool accepted = 3;
+  double latency_ms = 4;
+  string error = 5;
+}
+
+// Вердикт риск-движка.
+message RiskDecision {
+  bool allowed = 1;
+  string reason = 2;              // причина отказа (пусто при allowed=true)
+  double remaining_daily_usd = 3;
+  double remaining_hourly_usd = 4;
+  bool kill_switch = 5;
+  bool dry_run = 6;
+}
+
+// Метрика одного этапа пайплайна (бюджеты ТЗ §1.2).
+message LatencySample {
+  ServiceKind service = 1;
+  string stage = 2;
+  uint32 chain_id = 3;
+  uint64 block_number = 4;
+  uint32 latency_us = 5;
+  uint32 budget_us = 6;
+  bool within_budget = 7;
+}
+
+// Кросс-чейн интент (полный жизненный цикл).
+message Intent {
+  string id = 1;
+  string user = 2;
+  uint32 src_chain_id = 3;
+  uint32 dst_chain_id = 4;
+  string token_in = 5;
+  string token_out = 6;
+  string amount_in = 7;           // uint256 строкой
+  string min_amount_out = 8;
+  uint64 deadline = 9;
+  uint32 fee_bps = 10;            // ≤ 25 bps (проверяется контрактом BridgeAdapter)
+  string status = 11;             // open/filled/cancelled/expired
+}
+
+// ---------------------------------------------------------------------------
+// Сервисы
+// ---------------------------------------------------------------------------
+
+// Ингестор: публикация блоков и событий пулов в шину.
+service IngestorService {
+  rpc PublishBlock(BlockEvent) returns (PublishAck);
+  rpc PublishPoolStates(stream PoolState) returns (PublishAck);
+  rpc Health(HealthRequest) returns (HealthReply);
+}
+
+// Индекс пулов: выдача свежих состояний по сети.
+service PoolIndexerService {
+  rpc GetPool(PoolQuery) returns (PoolState);
+  rpc ListPools(ListPoolsRequest) returns (stream PoolState);
+  rpc Health(HealthRequest) returns (HealthReply);
+}
+
+// Симулятор: локальная проверка маршрута перед отправкой.
+service SimEngineService {
+  rpc Simulate(SimulateRequest) returns (SimulationResult);
+  rpc Health(HealthRequest) returns (HealthReply);
+}
+
+// Сборщик bundle и клиент релеев.
+service RelayService {
+  rpc BuildAndSubmit(BundleRequest) returns (stream RelaySubmission);
+  rpc Health(HealthRequest) returns (HealthReply);
+}
+
+// Риск-движок: право вето на любую сделку (kill-switch).
+service RiskService {
+  rpc Check(CheckRequest) returns (RiskDecision);
+  rpc RecordOutcome(RecordOutcomeRequest) returns (PublishAck);
+  rpc SetKillSwitch(KillSwitchRequest) returns (RiskDecision);
+  rpc Health(HealthRequest) returns (HealthReply);
+}
+
+// Алертинг: единая точка уведомлений (Telegram/Discord/webhook).
+service AlertService {
+  rpc Notify(NotifyRequest) returns (PublishAck);
+}
+
+// ---------------------------------------------------------------------------
+// Вспомогательные сообщения
+// ---------------------------------------------------------------------------
+
+message PublishAck {
+  bool ok = 1;
+  string error = 2;
+}
+
+message HealthRequest {
+  ServiceKind service = 1;
+  string instance_id = 2;
+}
+
+message HealthReply {
+  bool up = 1;
+  uint64 uptime_sec = 2;
+  uint64 head_lag_ms = 3;        // отставание от головы сети
+  uint32 queue_depth = 4;
+  string last_error = 5;
+}
+
+message PoolQuery {
+  uint32 chain_id = 1;
+  string address = 2;
+}
+
+message ListPoolsRequest {
+  uint32 chain_id = 1;
+  uint32 min_liquidity_usd = 2;
+  uint32 limit = 3;
+}
+
+message SimulateRequest {
+  Opportunity opportunity = 1;
+  uint32 max_staleness_ms = 2;    // запрет симуляции по устаревшему состоянию пула
+}
+
+message CheckRequest {
+  Opportunity opportunity = 1;
+  double gas_cost_usd = 2;
+  string wallet = 3;
+}
+
+message RecordOutcomeRequest {
+  string opportunity_uid = 1;
+  bool executed = 2;
+  bool reverted = 3;
+  double profit_usd = 4;
+  double size_usd = 5;
+  uint32 latency_us = 6;
+}
+
+message KillSwitchRequest {
+  bool active = 1;
+  string reason = 2;
+  string actor = 3;               // кто нажал кнопку (аудит)
+}
+
+message NotifyRequest {
+  string title = 1;
+  string message = 2;
+  string level = 3;               // info/warning/critical
+  map<string, string> payload = 4;
+}

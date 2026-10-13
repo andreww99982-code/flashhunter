@@ -1,0 +1,109 @@
+---
+# Роль flashhunter: доставка кода, секретов и запуск бота.
+# Ключевые принципы:
+#   1. Секреты приходят из vault/KMS и живут в файлах с правами 0400.
+#   2. Перед запуском всегда dry-run: реальный режим включается отдельным шагом.
+#   3. После запуска — обязательный health-check и проверка обработки блоков.
+
+- name: Получение кода FlashHunter нужной версии
+  ansible.builtin.git:
+    repo: "{{ flashhunter_repo | default('https://github.com/flashhunter/flashhunter.git') }}"
+    dest: "{{ flashhunter_dir }}/src"
+    version: "v{{ flashhunter_version }}"
+    depth: 1                 # история не нужна: экономим время и место
+    force: true
+    accept_hostkey: true
+  register: fh_checkout
+  notify: Пересборка и перезапуск
+  tags: [app]
+
+- name: Извлечение runtime-секретов из AWS Secrets Manager
+  ansible.builtin.shell: |
+    set -euo pipefail
+    aws secretsmanager get-secret-value \
+      --secret-id "flashhunter/{{ flashhunter_env }}/runtime" \
+      --query SecretString --output text > {{ flashhunter_dir }}/secrets/runtime.json
+    chmod 0400 {{ flashhunter_dir }}/secrets/runtime.json
+    chown {{ flashhunter_user }}:{{ flashhunter_user }} {{ flashhunter_dir }}/secrets/runtime.json
+  args:
+    creates: "{{ flashhunter_dir }}/secrets/runtime.json"
+  register: secrets_fetch
+  changed_when: secrets_fetch.rc == 0
+  tags: [app, secrets]
+  # На ноде роль имеет право читать секреты через instance profile (см. terraform)
+
+- name: Инжект приватного ключа keeper из KMS в локальный файл (права 0400)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    aws secretsmanager get-secret-value \
+      --secret-id "{{ vault_keeper_key_source }}" \
+      --query SecretString --output text > {{ flashhunter_dir }}/secrets/keeper.json
+    chmod 0400 {{ flashhunter_dir }}/secrets/keeper.json
+    chown {{ flashhunter_user }}:{{ flashhunter_user }} {{ flashhunter_dir }}/secrets/keeper.json
+  args:
+    creates: "{{ flashhunter_dir }}/secrets/keeper.json"
+  no_log: true                # ключ не должен попадать в лог Ansible
+  tags: [app, secrets]
+
+- name: Генерация .env для docker compose
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ flashhunter_dir }}/src/.env"
+    owner: "{{ flashhunter_user }}"
+    group: "{{ flashhunter_user }}"
+    mode: "0600"              # читает только владелец
+  notify: Пересборка и перезапуск
+  tags: [app, config]
+
+- name: "Сборка и запуск стека (профили: prod-хранилища + наблюдаемость)"
+  ansible.builtin.command:
+    cmd: >-
+      docker compose
+      --project-name flashhunter
+      --env-file .env
+      {{ ('--profile ' ~ compose_profiles.split(',') | join(' --profile ')) if compose_profiles else '' }}
+      up -d --build --remove-orphans
+    chdir: "{{ flashhunter_dir }}/src"
+  register: compose_up
+  changed_when: "'Started' in compose_up.stderr or 'Created' in compose_up.stderr or 'Built' in compose_up.stderr"
+  tags: [app, deploy]
+
+- name: Ожидание готовности API (до 2 минут)
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ api_port | default(8000) }}/api/v1/health"
+    status_code: 200
+    timeout: 10
+  register: api_health
+  retries: 24
+  delay: 5
+  until: api_health.status == 200
+  tags: [app, verify]
+
+- name: Проверка, что бот действительно обрабатывает блоки
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ api_port | default(8000) }}/api/v1/health"
+  register: health_round_1
+  tags: [app, verify]
+
+- name: Пауза для набора статистики
+  ansible.builtin.pause:
+    seconds: 15
+  tags: [app, verify]
+
+- name: Повторная проверка (blocks_processed должен вырасти)
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ api_port | default(8000) }}/api/v1/health"
+  register: health_round_2
+  failed_when: >-
+    (health_round_2.json.blocks_processed | default(0)) <=
+    (health_round_1.json.blocks_processed | default(0))
+  tags: [app, verify]
+
+- name: Статус развёртывания
+  ansible.builtin.debug:
+    msg: >-
+      FlashHunter {{ flashhunter_version }} запущен.
+      Режим: {{ 'DRY-RUN' if flashhunter_dry_run == 'true' else 'LIVE' }}.
+      Обработано блоков: {{ health_round_2.json.blocks_processed | default(0) }}.
+      Панель: http://{{ ansible_host }}:{{ api_port | default(8000) }}
+  tags: [app, verify]

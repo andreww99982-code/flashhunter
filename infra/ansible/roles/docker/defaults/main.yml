@@ -1,0 +1,19 @@
+---
+# Настройки Docker-демона: лог-ротация и лимиты файловых дескрипторов.
+docker_daemon_config:
+  log-driver: json-file
+  log-opts:
+    max-size: "20m"
+    max-file: "5"
+  # Боту нужны тысячи открытых сокетов (WS к RPC + HTTP-пул к релеям)
+  default-ulimits:
+    nofile:
+      Name: nofile
+      Soft: 65536
+      Hard: 65536
+  # Пул адресов по умолчанию: не конфликтует с VPC 10.42.0.0/16
+  default-address-pools:
+    - base: 172.30.0.0/16
+      size: 24
+  features:
+    buildkit: true

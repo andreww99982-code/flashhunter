@@ -1,0 +1,111 @@
+# FlashHunter: правила алертов Prometheus.
+# Порог дневного лимита убытка ДОЛЖЕН совпадать с RISK_DAILY_LOSS_LIMIT_USD в .env —
+# при изменении лимита обновите и здесь (или задайте порог через recording rule).
+groups:
+  - name: flashhunter-critical
+    rules:
+      # 1. API/панель недоступны
+      - alert: ApiDown
+        expr: up{job="flashhunter-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API FlashHunter недоступен"
+          description: "Prometheus не может скрейпить /metrics более минуты. Проверьте контейнер api и логи: docker compose logs api."
+
+      # 2. Оркестратор не работает — блоки не анализируются, мы молча пропускаем возможности
+      - alert: OrchestratorStalled
+        expr: flashhunter_service_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Оркестратор FlashHunter остановлен"
+          description: "Флаг service_up равен 0: пайплайн не обрабатывает блоки. Проверьте состояние процессов и RPC-соединение."
+
+      # 3. Достигнут дневной лимит убытка (порог = RISK_DAILY_LOSS_LIMIT_USD)
+      - alert: DailyLossLimitBreached
+        expr: flashhunter_pnl_usd{period="day"} < -500   # = RISK_DAILY_LOSS_LIMIT_USD по умолчанию
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Достигнут дневной лимит убытка"
+          description: "Kill-switch должен быть взведён автоматически. Проверьте /settings и журнал сделок на странице /history."
+
+      # 4. p95 обработки блока выше бюджета 5 мс (ТЗ §1.2) — проигрываем конкуренцию
+      - alert: LatencyBudgetExceeded
+        expr: histogram_quantile(0.95, sum(rate(flashhunter_block_latency_seconds_bucket[5m])) by (le)) > 0.005
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "p95 латентности обработки блока выше 5 мс"
+          description: "Бюджет горячего пути нарушен. Проверьте ингестор, индекс пулов и загрузку CPU."
+
+  - name: flashhunter-warning
+    rules:
+      # 5. Много ревертов: симулятор расходится с реальностью или данные устарели
+      - alert: HighRevertRate
+        expr: |
+          sum(rate(flashhunter_executions_total{status="reverted"}[10m]))
+            / clamp_min(sum(rate(flashhunter_executions_total[10m])), 0.0001) > 0.3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Более 30% сделок ревертятся"
+          description: "Проверьте свежесть состояния пулов и настройки симулятора (staleness, max_gas_gwei)."
+
+      # 6. Kill-switch взведён: торговля остановлена, оператор должен разобраться и снять вручную
+      - alert: KillSwitchActive
+        expr: flashhunter_kill_switch_active == 1
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kill-switch активен"
+          description: "Торговля остановлена. Проверьте причину срабатывания в /logs и снимите блокировку осознанно."
+
+      # 7. Релеи почти не принимают bundle — теряем доступ к включению в блок
+      - alert: RelayAcceptanceDrop
+        expr: |
+          sum(rate(flashhunter_relay_submissions_total{result="accepted"}[15m]))
+            / clamp_min(sum(rate(flashhunter_relay_submissions_total[15m])), 0.0001) < 0.2
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Менее 20% bundle принимаются релеями"
+          description: "Проверьте авторизацию релеев, таймауты и конкурентоспособность комиссии (maxFeePerGas)."
+
+      # 8. Нет новых возможностей 15 минут: либо рынок тихий, либо ингестор отстал
+      - alert: NoOpportunitiesDetected
+        expr: increase(flashhunter_opportunities_total[15m]) == 0 and flashhunter_service_up == 1
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "15 минут без найденных возможностей"
+          description: "Проверьте фильтры стратегий (min_profit_usd, размеры) и глубину индекса пулов. Тихий рынок тоже возможен."
+
+      # 9. Включён dry-run дольше суток — вероятно, забыли переключить после обкатки
+      - alert: DryRunStuck
+        expr: flashhunter_dry_run_active == 1
+        for: 24h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Dry-run активен более 24 часов"
+          description: "Проверьте результаты бэктеста и переключите режим осознанно (нужно 24 часа наблюдения по регламенту ТЗ §16)."
+
+      # 10. Траты на газ растут быстрее прибыли
+      - alert: GasSpendHigh
+        expr: rate(flashhunter_gas_spend_usd_total[1h]) > 50
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Расход на газ выше $50/час"
+          description: "Проверьте долю ревертов и конкуренцию за блоки: возможно, bundle включён, но убыточен."

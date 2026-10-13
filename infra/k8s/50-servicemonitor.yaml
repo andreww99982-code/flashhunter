@@ -1,0 +1,52 @@
+# ServiceMonitor для kube-prometheus-stack: автоматический скрейп метрик бота.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: flashhunter-api
+  namespace: flashhunter
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames: ["flashhunter"]
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 10s
+      scrapeTimeout: 5s
+      relabelings:
+        - { sourceLabels: [__meta_kubernetes_pod_name], targetLabel: pod }
+---
+# Правила алертов, упакованные как PrometheusRule (эквивалент alerts.yml из docker).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: flashhunter-rules
+  namespace: flashhunter
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: flashhunter.k8s
+      rules:
+        - alert: FlashHunterKillSwitchActive
+          expr: flashhunter_kill_switch_active == 1
+          for: 1m
+          labels: { severity: critical }
+          annotations:
+            summary: "Kill-switch активен в кластере"
+        - alert: FlashHunterLatencyBudgetExceeded
+          expr: histogram_quantile(0.95, sum(rate(flashhunter_block_latency_seconds_bucket[5m])) by (le)) > 0.005
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: "p95 обработки блока выше бюджета 5 мс (ТЗ §1.2)"
+        - alert: FlashHunterPodRestarting
+          expr: increase(kube_pod_container_status_restarts_total{namespace="flashhunter"}[15m]) > 2
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "Поды бота перезапускаются: возможна утечка или OOM"

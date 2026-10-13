@@ -1,0 +1,62 @@
+# FlashHunter API: многоступенчатая сборка.
+#   Ступень 1 (node): собирает SPA в python/flashhunter/ui_static — UI отдаёт тот же FastAPI.
+#   Ступень 2 (python): ставит зависимости, копирует код, запускает uvicorn на 0.0.0.0:8000.
+# Итоговый образ содержит и API, и панель — один контейнер, один порт, ноль CORS-проблем.
+
+# ---------------------------------------------------------------------------
+# Ступень 1: сборка фронтенда
+# ---------------------------------------------------------------------------
+FROM node:20-alpine AS ui-builder
+
+WORKDIR /ui
+
+# package.json до исходников: слой с node_modules кэшируется между сборками
+COPY ui/package.json ui/package-lock.json* ./
+RUN npm ci --no-audit --no-fund
+
+COPY ui/ ./
+# vite.config.ts кладёт сборку прямо в python/flashhunter/ui_static (outDir задан в конфиге)
+RUN mkdir -p /ui_dist && npm run build && cp -r /ui/python/flashhunter/ui_static/. /ui_dist/ 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
+# Ступень 2: рантайм приложения
+# ---------------------------------------------------------------------------
+FROM python:3.12-slim AS runtime
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    FLASHHUNTER_ENV=dev \
+    FLASHHUNTER_DB_MODE=sqlite \
+    SQLITE_PATH=/data/flashhunter.db \
+    MOCK_MARKET_DATA=true \
+    API_HOST=0.0.0.0 \
+    API_PORT=8000
+
+# curl нужен healthcheck-у; build-essential — для колёс без wheels (мало, но бывает)
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Зависимости отдельным слоем: правки кода не пересобирают их
+COPY python/pyproject.toml ./python/pyproject.toml
+COPY README.md ./README.md
+RUN pip install --upgrade pip && pip install "./python[cluster]"
+
+COPY python/ ./python/
+# Готовая SPA из ступени 1 (перекрывает возможный «пустой» каталог в репозитории)
+COPY --from=ui-builder /ui_dist/ ./python/flashhunter/ui_static/
+
+# Каталог для SQLite-базы и данных (монтируется volume-ом в compose)
+RUN mkdir -p /data && useradd --create-home --uid 10001 flashhunter && chown -R flashhunter:flashhunter /app /data
+USER flashhunter
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=25s --retries=5 \
+  CMD curl -fsS http://127.0.0.1:8000/api/v1/ping || exit 1
+
+WORKDIR /app/python
+CMD ["python", "-m", "uvicorn", "flashhunter.api.app:app", "--host", "0.0.0.0", "--port", "8000"]

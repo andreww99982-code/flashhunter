@@ -1,0 +1,24 @@
+# Постоянные тома: только там, где действительно нужно хранить данные вне подов.
+# SQLite-файл (single-node режим) + отчёты бэктеста.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: flashhunter-data
+  namespace: flashhunter
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: standard
+  resources:
+    requests: { storage: 20Gi }
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: flashhunter-reports
+  namespace: flashhunter
+spec:
+  accessModes: ["ReadWriteMany"]      # отчёты читают несколько реплик
+  storageClassName: standard-rwx
+  resources:
+    requests: { storage: 50Gi }

@@ -1,0 +1,36 @@
+---
+# Несекретные переменные окружения для деплоя.
+# Секреты (ключи кошельков, RPC-ключи, JWT) — в group_vars/all/vault.yml (зашифрован ansible-vault).
+
+flashhunter_env: prod
+flashhunter_log_level: INFO
+flashhunter_log_json: "true"
+
+# Комплаенс: перед реальной торговлей обязателен 24-часовой dry-run (ТЗ §16)
+flashhunter_dry_run: "true"
+flashhunter_force_password_change: "true"
+
+# Риск-лимиты продакшна: жёстче локальных
+risk_daily_loss_limit_usd: 500
+risk_hourly_loss_limit_usd: 150
+risk_max_exposure_per_chain_usd: 50000
+risk_max_exposure_per_token_usd: 20000
+
+# Исполнение
+exec_min_profit_usd: 5
+exec_max_gas_gwei: 120
+exec_replacement_bump_pct: 15
+exec_max_slippage_bps: 50
+
+# Хранилища (пароли — в vault)
+postgres_db: flashhunter
+postgres_user: flashhunter
+clickhouse_db: flashhunter
+
+# Бэкапы
+backup_bucket: flashhunter-backups-prod
+backup_schedule: "15 */6 * * *"
+
+# Наблюдаемость
+prometheus_port: 9090
+grafana_port: 3001

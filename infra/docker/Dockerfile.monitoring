@@ -1,0 +1,13 @@
+# FlashHunter: контейнер мониторинга (Prometheus + скрейп-конфиг из репозитория).
+# Отдельный Dockerfile, чтобы конфиги брались из infra/docker/prometheus.yml,
+# а дашборд Grafana поднимался из файла provisioning (см. infra/docker/grafana/).
+
+FROM prom/prometheus:v2.55.0
+
+COPY infra/docker/prometheus.yml /etc/prometheus/prometheus.yml
+COPY infra/docker/alerts.yml /etc/prometheus/alerts.yml
+
+EXPOSE 9090
+CMD ["--config.file=/etc/prometheus/prometheus.yml", \
+     "--storage.tsdb.retention.time=30d", \
+     "--web.enable-lifecycle"]

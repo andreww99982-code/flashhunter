@@ -1,0 +1,35 @@
+# Вход в панель: HTTPS через cert-manager (Let's Encrypt).
+# Basic-auth на уровне ingress НЕ используем — у нас собственная JWT-авторизация и 2FA.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: flashhunter-api
+  namespace: flashhunter
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"     # WebSocket-канал
+    nginx.ingress.kubernetes.io/proxy-body-size: "8m"
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+    nginx.ingress.kubernetes.io/limit-rpm: "600"
+    nginx.ingress.kubernetes.io/enable-modsecurity: "true"
+    # Запрещаем индексировать панель: это внутренний инструмент
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      add_header X-Robots-Tag "noindex, nofollow" always;
+      add_header X-Frame-Options "DENY" always;
+      add_header X-Content-Type-Options "nosniff" always;
+      add_header Strict-Transport-Security "max-age=63072000" always;
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: ["flashhunter.example.com"]
+      secretName: flashhunter-tls
+  rules:
+    - host: flashhunter.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: flashhunter-api
+                port: { number: 80 }

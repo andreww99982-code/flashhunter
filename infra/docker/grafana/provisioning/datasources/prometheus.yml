@@ -1,0 +1,12 @@
+# FlashHunter: источник данных Grafana (Prometheus в том же compose-проекте).
+apiVersion: 1
+datasources:
+  - name: FlashHunter-Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      timeInterval: 10s        # совпадает со scrape_interval в prometheus.yml
+      httpMethod: POST
+    editable: false

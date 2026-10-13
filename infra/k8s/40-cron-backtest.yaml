@@ -1,0 +1,69 @@
+# Ночной бэктест на исторических данных: проверка, что стратегии не «сломались»
+# после изменения рынка. Результат пишется в БД и становится виден на /backtest.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: flashhunter-nightly-backtest
+  namespace: flashhunter
+spec:
+  # 03:00 UTC = 06:00 МСК — окно низкой активности рынка
+  schedule: "0 3 * * *"
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: backtest
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: backtest
+              image: ghcr.io/flashhunter/api:0.1.0
+              command:
+                - python
+                - -c
+                - |
+                  import asyncio, json, pathlib
+                  from flashhunter.backtest.engine import BacktestEngine
+                  from flashhunter.db.session import init_models
+
+                  async def main() -> None:
+                      # 1. Готовим БД и прогоняем 500 блоков на трёх профилях рынка
+                      await init_models()
+                      report = BacktestEngine(
+                          strategies=["dex_arb", "triangular", "stable_peg", "liquidation"],
+                          profile="volatile", seed=20261012, min_profit_usd=5.0,
+                      ).run_mock(blocks=500)
+                      data = report.as_dict()
+                      # 2. Сохраняем отчёт: утром оператор увидит его на странице /backtest
+                      pathlib.Path("/data/reports").mkdir(parents=True, exist_ok=True)
+                      pathlib.Path("/data/reports/nightly.json").write_text(
+                          json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+                      )
+                      # 3. Жёсткий инвариант: если стратегии перестали находить сделки — это алерт
+                      if data["total_net_usd"] <= 0:
+                          raise SystemExit(f"Ночной бэктест убыточен: {data['total_net_usd']} USD")
+
+                  asyncio.run(main())
+              envFrom:
+                - configMapRef: { name: flashhunter-config }
+                - secretRef: { name: flashhunter-secrets }
+              volumeMounts:
+                - { name: reports, mountPath: /data/reports }
+              resources:
+                requests: { cpu: "500m", memory: "512Mi" }
+                limits: { cpu: "2", memory: "2Gi" }
+          volumes:
+            - name: reports
+              persistentVolumeClaim:
+                claimName: flashhunter-reports

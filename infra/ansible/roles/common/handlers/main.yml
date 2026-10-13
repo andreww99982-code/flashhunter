@@ -1,0 +1,14 @@
+---
+- name: Перезапуск sshd
+  ansible.builtin.service:
+    name: sshd
+    state: restarted
+
+- name: Перезапуск fail2ban
+  ansible.builtin.service:
+    name: fail2ban
+    state: restarted
+
+- name: Перезагрузка правил аудита
+  ansible.builtin.command: augenrules --load
+  changed_when: true

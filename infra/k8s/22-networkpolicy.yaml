@@ -1,0 +1,49 @@
+# Сетевые политики: бот видит только то, что нужно, и выходит в интернет только к RPC/релеям.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: flashhunter-api
+  namespace: flashhunter
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: flashhunter
+      app.kubernetes.io/component: api
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    # Трафик из ingress-контроллера (панель) и от Prometheus (метрики)
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: ingress-nginx }
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: monitoring }
+      ports:
+        - { protocol: TCP, port: 8000 }
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    # Хранилища внутри кластера
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: flashhunter }
+      ports:
+        - { protocol: TCP, port: 5432 }   # Postgres
+        - { protocol: TCP, port: 8123 }   # ClickHouse
+        - { protocol: TCP, port: 6379 }   # Redis
+        - { protocol: TCP, port: 4222 }   # NATS
+    # Внешний мир: RPC-провайдеры и MEV-релеи (443 + 8545/8546 для RPC)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - { protocol: TCP, port: 443 }
+        - { protocol: TCP, port: 8545 }
+        - { protocol: TCP, port: 8546 }

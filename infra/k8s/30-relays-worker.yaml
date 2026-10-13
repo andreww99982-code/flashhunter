@@ -1,0 +1,65 @@
+# Rust-сервисы горячего пути (ингестор + индекс пулов + граф + симулятор).
+# Разложены в один Deployment с явной командой: их связка живёт в одном пода,
+# чтобы передавать состояние пулов через shared memory, а не по сети.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flashhunter-hotpath
+  namespace: flashhunter
+  labels:
+    app.kubernetes.io/component: hotpath
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: flashhunter
+      app.kubernetes.io/component: hotpath
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: flashhunter
+        app.kubernetes.io/component: hotpath
+    spec:
+      serviceAccountName: flashhunter
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10002
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: ingestor
+          image: ghcr.io/flashhunter/rust:0.1.0
+          command: ["fh-ingestor"]
+          envFrom:
+            - configMapRef: { name: flashhunter-config }
+            - secretRef: { name: flashhunter-secrets }
+          resources:
+            requests: { cpu: "1", memory: "512Mi" }   # горячий путь: CPU выделен заранее
+            limits: { cpu: "2", memory: "1Gi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+        - name: sim-engine
+          image: ghcr.io/flashhunter/rust:0.1.0
+          command: ["fh-sim-engine"]
+          envFrom:
+            - configMapRef: { name: flashhunter-config }
+            - secretRef: { name: flashhunter-secrets }
+          resources:
+            requests: { cpu: "1", memory: "512Mi" }
+            limits: { cpu: "2", memory: "1Gi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+# Сервисный аккаунт: без прав в API кластера (боту не нужно управлять K8s)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flashhunter
+  namespace: flashhunter
+automountServiceAccountToken: false

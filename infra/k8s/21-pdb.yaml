@@ -1,0 +1,12 @@
+# PodDisruptionBudget: при обновлении нод у бота всегда остаётся рабочая реплика.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: flashhunter-api
+  namespace: flashhunter
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: flashhunter
+      app.kubernetes.io/component: api
