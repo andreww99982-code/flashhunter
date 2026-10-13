@@ -1,0 +1,3 @@
+[console_scripts]
+flashhunter-api = flashhunter.api.app:main
+flashhunter-orchestrator = flashhunter.orchestrator:main

@@ -1,0 +1,103 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flashhunter"
+version = "0.1.0"
+description = "FlashHunter — промышленный DeFi-комбайн: flash-loan арбитраж, ликвидации, JIT, backrun, cross-chain intents"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "aiosqlite>=0.20",
+    "PyJWT>=2.9",
+    "bcrypt>=4.2",
+    "pyotp>=2.9",
+    "httpx>=0.27",
+    "orjson>=3.10",
+    "prometheus-client>=0.21",
+    "tenacity>=9.0",
+    "structlog>=24.4",
+    # QR-код для настройки TOTP-двухфакторной аутентификации (страница /settings)
+    "qrcode>=8.0",
+    # Живой режим: EVM-кодирование (ABI), подпись транзакций, WebSocket к мемпулу и блокам
+    "eth-utils>=5.0",
+    "eth-abi>=5.1",
+    "eth-account>=0.13",
+    "websockets>=13.0",
+]
+
+[project.optional-dependencies]
+# Кластерный режим: Postgres вместо SQLite, ClickHouse как TSDB, Redis как hot-cache
+cluster = [
+    "asyncpg>=0.30",
+    "clickhouse-connect>=0.8",
+    "redis>=5.2",
+    "nats-py>=2.9",
+    "alembic>=1.14",
+]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "types-PyJWT",
+    "types-passlib",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+flashhunter-api = "flashhunter.api.app:main"
+flashhunter-orchestrator = "flashhunter.orchestrator:main"
+
+[tool.setuptools]
+packages = [
+    "flashhunter",
+    "flashhunter.config",
+    "flashhunter.chain",
+    "flashhunter.db",
+    "flashhunter.strategies",
+    "flashhunter.strategies.math",
+    "flashhunter.risk",
+    "flashhunter.pnl",
+    "flashhunter.alerting",
+    "flashhunter.backtest",
+    "flashhunter.api",
+    "flashhunter.api.routes",
+    "flashhunter.deployer",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+src = ["."]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "ASYNC", "S", "RET", "PTH", "TID"]
+ignore = ["S101", "B008", "S105", "S106", "S311", "N818"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S", "N"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
+exclude = ["tests/"]
