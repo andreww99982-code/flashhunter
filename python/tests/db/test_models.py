@@ -37,8 +37,15 @@ async def test_seed_creates_reference_data(db_ready: None) -> None:
         }
     assert counts["users"] >= 1
     assert counts["networks"] >= 10
-    assert counts["tokens"] >= 50
+    assert counts["tokens"] >= 5
     assert counts["strategies"] == 7
+    async with session_scope() as session:
+        non_mainnet_tokens = await session.execute(
+            select(func.count(Token.id))
+            .join(Network, Token.network_id == Network.id)
+            .where(Network.chain_id != 1)
+        )
+    assert non_mainnet_tokens.scalar_one() == 0
 
 
 async def test_seed_is_idempotent(db_ready: None) -> None:
@@ -50,6 +57,36 @@ async def test_seed_is_idempotent(db_ready: None) -> None:
     async with session_scope() as session:
         after = (await session.execute(select(func.count(StrategyConfig.id)))).scalar_one()
     assert before == after
+
+
+async def test_seed_disables_mainnet_tokens_on_other_chains(db_ready: None) -> None:
+    """Старые ошибочные копии mainnet-адресов выключаются на других сетях."""
+    from flashhunter.db.seed import STABLES
+
+    async with session_scope() as session:
+        network = (
+            await session.execute(select(Network).where(Network.chain_id == 42161))
+        ).scalar_one()
+        session.add(
+            Token(
+                network_id=network.id,
+                symbol="USDC",
+                address=STABLES["USDC"][0],
+                decimals=6,
+                enabled=True,
+            )
+        )
+    await seed_all()
+    async with session_scope() as session:
+        legacy_token = (
+            await session.execute(
+                select(Token).where(
+                    Token.network_id == network.id,
+                    Token.address == STABLES["USDC"][0],
+                )
+            )
+        ).scalar_one()
+    assert legacy_token.enabled is False
 
 
 async def test_jit_and_intent_enabled_by_default(db_ready: None) -> None:

@@ -4,7 +4,7 @@
 #   → http://localhost:8000  (admin / admin, потребуется смена пароля)
 #
 # Профили:
-#   (без профиля)       — api: SQLite + мок-рынок, всё в одном контейнере
+#   (без профиля)       — API: SQLite + реальные RPC-данные
 #   --profile cluster   — + Postgres, ClickHouse, Redis (прод-хранилища)
 #   --profile observability — + Prometheus и Grafana (метрики и дашборды)
 #   --profile edge      — + nginx (TLS-терминация, rate-limit на /login)
@@ -41,7 +41,7 @@ services:
       CLICKHOUSE_DSN: ${CLICKHOUSE_DSN:-clickhouse://clickhouse:8123/flashhunter}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       # Боевой рынок по умолчанию: настоящие RPC-данные. Мок включается только вручную.
-      MOCK_MARKET_DATA: ${MOCK_MARKET_DATA:-true}
+      MOCK_MARKET_DATA: ${MOCK_MARKET_DATA:-false}
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production-please-32-chars}
       ADMIN_DEFAULT_USER: ${ADMIN_DEFAULT_USER:-admin}
       ADMIN_DEFAULT_PASSWORD: ${ADMIN_DEFAULT_PASSWORD:-admin}
@@ -50,8 +50,7 @@ services:
       RISK_HOURLY_LOSS_LIMIT_USD: ${RISK_HOURLY_LOSS_LIMIT_USD:-150}
       EXEC_MIN_PROFIT_USD: ${EXEC_MIN_PROFIT_USD:-5}
       EXEC_MAX_GAS_GWEI: ${EXEC_MAX_GAS_GWEI:-120}
-      # RPC-ключи (заполняются в .env; в мок-режиме не требуются)
-      # RPC-ключи: без них работают публичные узлы (медленнее и с лимитами)
+      # Для Ethereum есть публичные fallback-RPC; для других сетей задайте свой endpoint.
       ETH_RPC_HTTP: ${ETH_RPC_HTTP:-}
       ETH_RPC_WS: ${ETH_RPC_WS:-}
       LIVE_CHAIN_ID: ${LIVE_CHAIN_ID:-1}

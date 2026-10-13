@@ -253,6 +253,10 @@ class Settings(BaseSettings):
                 raise ValueError("JWT_SECRET must be rotated before running in prod")
             if self.admin_default_password.get_secret_value() == "admin":
                 raise ValueError("ADMIN_DEFAULT_PASSWORD must be changed in prod")
+            if self.mock_market_data:
+                raise ValueError("MOCK_MARKET_DATA must be false in prod")
+            if not self.rpc_endpoints(self.live_chain_id):
+                raise ValueError("A live RPC endpoint is required for the configured chain in prod")
         if self.exec_min_profit_usd < 0:
             raise ValueError("EXEC_MIN_PROFIT_USD must be >= 0")
         return self

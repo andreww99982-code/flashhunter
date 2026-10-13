@@ -22,7 +22,7 @@ echo "→ Пересоздаю базу: ${DB_PATH}"
 rm -f "$DB_PATH" "$DB_PATH-wal" "$DB_PATH-shm"
 
 export SQLITE_PATH="$DB_PATH"
-export MOCK_MARKET_DATA="${MOCK_MARKET_DATA:-true}"
+export MOCK_MARKET_DATA="${MOCK_MARKET_DATA:-false}"
 export FLASHHUNTER_DRY_RUN="${FLASHHUNTER_DRY_RUN:-true}"
 
 python3 - <<'PY'

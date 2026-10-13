@@ -220,9 +220,21 @@ async def _seed(session: AsyncSession) -> dict[str, int]:
             await session.flush()
             created["networks"] += 1
 
+        # Эти адреса — только Ethereum mainnet. Не размножаем их в записи сетей,
+        # где те же адреса могут обозначать другие контракты или вообще быть пустыми.
+        if spec["chain_id"] != 1:
+            legacy_mainnet_addresses = [address for address, _ in STABLES.values()]
+            legacy = await session.execute(
+                select(Token).where(
+                    Token.network_id == network.id,
+                    Token.address.in_(legacy_mainnet_addresses),
+                    Token.enabled.is_(True),
+                )
+            )
+            for token in legacy.scalars():
+                token.enabled = False
+            continue
         for symbol, (address, decimals) in STABLES.items():
-            if spec["chain_id"] != 1 and symbol in {"WBTC", "WETH"}:
-                pass  # на L2 адреса иные — заполняются из реестра токенов при индексации
             exists = await session.execute(
                 select(Token).where(Token.network_id == network.id, Token.address == address)
             )

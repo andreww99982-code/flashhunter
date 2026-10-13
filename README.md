@@ -57,7 +57,7 @@ FlashHunter — самодостаточная система из трёх ча
 ограничены сожжённым газом.
 
 **Что вы получите из коробки:** рабочий стек, поднимающийся одной командой, панель
-на 12 страниц с Material Design 3 + Liquid Glass, мок-рынок для безопасной отладки,
+на 12 страниц с Material Design 3 + Liquid Glass, реальные данные сети в режиме dry-run,
 130 Python-тестов, Foundry-тесты с фаззингом, Echidna-инварианты, схемы для SQLite,
 Postgres и ClickHouse, конфигурацию для Docker, Kubernetes, Terraform и Ansible.
 
@@ -67,31 +67,36 @@ Postgres и ClickHouse, конфигурацию для Docker, Kubernetes, Terr
 
 ### Вариант А: одна команда (Docker)
 
-Требуется Docker Desktop (на macOS должен быть запущен).
+Требуется Docker Desktop (на macOS должен быть запущен). По умолчанию используются
+реальные данные Ethereum; для постоянной работы укажите собственный `ETH_RPC_HTTP`
+в `.env` (публичные RPC в коде предусмотрены только как резервные).
 
 ```bash
 git clone https://github.com/flashhunter/flashhunter.git
 cd flashhunter
-docker compose up -d
-```
-
-Через 2–4 минуты (первая сборка ставит зависимости) откройте **http://localhost:8000**.
-Логин `admin`, пароль `admin` — система сразу потребует сменить пароль.
-
-### Вариант Б: с автогенерацией секретов
-
-```bash
 bash scripts/bootstrap.sh
 ```
 
-Скрипт проверит Docker, создаст `.env` со случайными `JWT_SECRET` и паролями,
-соберёт стек, дождётся health-check и напечатает учётные данные.
+Bootstrap создаст production-конфигурацию с реальными данными, сгенерирует секреты
+и пароль администратора, затем соберёт и запустит Docker-стек. Для надёжной работы
+добавьте свой `ETH_RPC_HTTP` в `.env` до запуска. Сохраните напечатанный пароль.
+Панель откроется на **http://localhost:8000**.
+
+### Вариант Б: ручная настройка
+
+```bash
+cp .env.example .env
+# Задайте уникальные JWT_SECRET, ADMIN_DEFAULT_PASSWORD и ETH_RPC_HTTP.
+docker compose up -d
+```
+
+Не запускайте production-конфигурацию с секретами из шаблона.
 
 ### Вариант В: локальная разработка без Docker
 
 ```bash
 make install      # pip install -e "python[dev]" + npm install
-make dev          # API на :8000 (SQLite, мок-рынок)
+make dev          # API на :8000 (SQLite, реальные RPC-данные; нужен RPC)
 # или оба сервера сразу (API + Vite dev с проксированием /api и /ws):
 bash scripts/dev.sh
 ```
@@ -106,10 +111,13 @@ docker compose --profile edge up -d                       # + nginx (gzip, rate-
 
 ### Что происходит после старта
 
-* Бот работает в режиме **DRY-RUN** (`FLASHHUNTER_DRY_RUN=true`) с **мок-рынком**
-  (`MOCK_MARKET_DATA=true`): находит возможности, симулирует сделки, пишет статистику,
-  но **не отправляет ничего в сеть** и не требует RPC-ключей.
-* Панель показывает живые данные: возможности появляются каждые несколько секунд.
+* По умолчанию включён **DRY-RUN**: данные поступают из реальной сети (`MOCK_MARKET_DATA=false`),
+  но сделки не отправляются в сеть.
+* Для Ethereum есть публичные fallback RPC; для надёжной эксплуатации настройте свой `ETH_RPC_HTTP`.
+  Без доступного RPC живой поток рынка не работает — мок-данные автоматически не подставляются.
+* Реальные возможности появятся только при наличии обновляемых снимков пулов, не гарантированно каждые секунды.
+* DRY-RUN оставлен включённым намеренно: переключение в live execution требует отдельно
+  настроить кошелёк, развернуть и проверить контракты и пройти проверки риска.
 * Чтобы увидеть бота в деле, загляните на `/dashboard`, `/opportunities` и `/backtest`.
 
 ---
@@ -400,7 +408,7 @@ bundle, «залипший» dry-run, всплеск трат на газ.
 
 ## 14. Конфигурация
 
-Основные переменные окружения и безопасные значения для локального запуска — в [`.env.example`](.env.example).
+Переменные окружения для запуска с реальными данными — в [`.env.example`](.env.example).
 
 ```bash
 cp .env.example .env
@@ -410,7 +418,7 @@ cp .env.example .env
 
 | Группа | Примеры | Назначение |
 |--------|---------|-----------|
-| Окружение | `FLASHHUNTER_ENV`, `FLASHHUNTER_DRY_RUN`, `MOCK_MARKET_DATA` | Режим работы |
+| Окружение | `FLASHHUNTER_ENV`, `FLASHHUNTER_DRY_RUN`, `MOCK_MARKET_DATA` | Среда, отправка транзакций и источник данных |
 | Хранилища | `FLASHHUNTER_DB_MODE`, `SQLITE_PATH`, `POSTGRES_DSN`, `CLICKHOUSE_DSN`, `REDIS_URL` | Где хранятся данные |
 | API | `API_HOST`, `API_PORT`, `JWT_SECRET`, `ADMIN_DEFAULT_USER/PASSWORD`, `CORS_ORIGINS` | Панель и авторизация |
 | RPC | `ETH_RPC_HTTP/WS`, `ARB_RPC_HTTP`, `BASE_RPC_HTTP`, … | Доступ к блокчейнам |
@@ -545,7 +553,7 @@ flashhunter/
 | `/opportunities` пуст | Тихий рынок или выключены стратегии | Проверьте `/strategies`; прогоните `/backtest` |
 | Латентность «в красном» | Медленный CPU/RPC или мало ресурсов | Проверьте `docker stats`, смените RPC, снизьте число сетей |
 | Kill-switch взведён | Сработал лимит убытка или нажал оператор | Разберитесь в причине на `/logs`, затем снимите осознанно |
-| RPC-ошибки в логах | Ключ не задан (мок-режим выключен) | Заполните `ETH_RPC_HTTP` в `.env` или оставьте `MOCK_MARKET_DATA=true` |
+| RPC-ошибки в логах | RPC endpoint недоступен или не задан для сети | Укажите рабочий `ETH_RPC_HTTP` / endpoint нужной сети в `.env`; мок-данные не подставляются |
 | `sqlite3.OperationalError: unable to open database file` | Недоступен путь к БД | Проверьте права на `SQLITE_PATH` и volume `flashhunter_data` |
 | Порты заняты | На хосте уже слушают :8000/:5432/:9090 | Измените `API_PORT`/`POSTGRES_PORT`/`PROMETHEUS_PORT` в `.env` |
 

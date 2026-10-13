@@ -11,7 +11,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 export FLASHHUNTER_ENV="${FLASHHUNTER_ENV:-dev}"
-export MOCK_MARKET_DATA="${MOCK_MARKET_DATA:-true}"
+export MOCK_MARKET_DATA="${MOCK_MARKET_DATA:-false}"
 export FLASHHUNTER_DRY_RUN="${FLASHHUNTER_DRY_RUN:-true}"
 export FLASHHUNTER_AUTO_OPEN_BROWSER="${FLASHHUNTER_AUTO_OPEN_BROWSER:-false}"
 export SQLITE_PATH="${SQLITE_PATH:-/tmp/flashhunter_dev.db}"

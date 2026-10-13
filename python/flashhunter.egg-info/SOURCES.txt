@@ -33,6 +33,7 @@ flashhunter/backtest/engine.py
 flashhunter/chain/__init__.py
 flashhunter/chain/abi.py
 flashhunter/chain/rpc.py
+flashhunter/chain/signer.py
 flashhunter/chain/uniswap_math.py
 flashhunter/config/__init__.py
 flashhunter/config/secrets.py

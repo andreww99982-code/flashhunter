@@ -57,7 +57,7 @@ flashhunter/
 ├── alerting/       # Telegram, Discord, универсальный webhook, журнал
 ├── pnl/            # PnL-трекер: агрегаты по периодам, equity-кривая
 ├── deployer/       # Деплой и верификация контрактов через Foundry
-├── market/         # Источник данных: мок-рынок (для локального запуска) и реальный
+├── market/         # Источник реальных рыночных данных; mock-адаптер используется тестами
 ├── db/             # 17 моделей SQLAlchemy, сессии, идемпотентный сид демо-данных
 └── config/         # Настройки (pydantic-settings) и шифрование секретов
 
@@ -82,7 +82,7 @@ uvicorn flashhunter.api.app:app --host 0.0.0.0 --port 8000   # API + панел�
 |-----------|-------|
 | `FLASHHUNTER_ENV` | `dev` \| `staging` \| `prod` — режим строгости настроек |
 | `FLASHHUNTER_DRY_RUN` | `true` — сделки симулируются, но не отправляются |
-| `MOCK_MARKET_DATA` | `true` — мок-рынок: старт без RPC-ключей |
+| `MOCK_MARKET_DATA` | По умолчанию `false`: используйте реальные рыночные данные из RPC |
 | `FLASHHUNTER_DB_MODE` | `sqlite` \| `postgres` |
 | `SQLITE_PATH` | Путь к файлу SQLite (в compose — `/data/flashhunter.db`) |
 | `JWT_SECRET`, `ADMIN_DEFAULT_USER/PASSWORD` | Авторизация панели и первый вход |
@@ -90,7 +90,7 @@ uvicorn flashhunter.api.app:app --host 0.0.0.0 --port 8000   # API + панел�
 | `EXEC_*` | Минимальная прибыль, потолок газа, проскальзывание, таймаут симуляции |
 | `ALERT_*` | Telegram-токен/чат, Discord-webhook, произвольный webhook |
 
-Полный список — `../.env.example` (более 80 параметров с комментариями).
+Основные переменные окружения — в `../.env.example`; дополнительные параметры и значения по умолчанию описаны в `flashhunter/config/settings.py`.
 
 ## Тесты
 
