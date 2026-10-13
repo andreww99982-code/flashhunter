@@ -14,6 +14,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+umask 077
 
 # --- цвета для читаемого вывода -------------------------------------------- #
 C_RESET='\033[0m'; C_OK='\033[0;32m'; C_WARN='\033[0;33m'; C_ERR='\033[0;31m'; C_INFO='\033[0;36m'
@@ -25,8 +26,8 @@ info() { echo -e "${C_INFO}→${C_RESET} $*"; }
 # --- 1. Проверка окружения -------------------------------------------------- #
 info "Проверяю зависимости..."
 if ! command -v docker >/dev/null 2>&1; then
-  err "Docker не установлен. Установите Docker Engine 24+ и повторите запуск."
-  err "Инструкция: https://docs.docker.com/engine/install/"
+  err "Docker не установлен. На macOS установите Docker Desktop и повторите запуск."
+  err "Инструкция: https://docs.docker.com/get-started/get-docker/"
   exit 1
 fi
 ok "docker: $(docker --version)"
@@ -38,7 +39,7 @@ fi
 ok "compose: $(docker compose version --short)"
 
 if ! docker info >/dev/null 2>&1; then
-  err "Не могу связаться с демоном Docker. Запустите его (sudo systemctl start docker) или выдайте пользователю права группы docker."
+  err "Не могу связаться с Docker. Запустите Docker Desktop (macOS) или Docker Engine и повторите запуск."
   exit 1
 fi
 
@@ -52,6 +53,19 @@ gen_secret() {
     openssl rand -hex "$length"
   else
     head -c "$((length * 2))" /dev/urandom | od -An -tx1 | tr -d ' \n'
+  fi
+}
+
+replace_env() {
+  local key="$1"
+  local value="$2"
+  local temp_file
+  temp_file="$(mktemp .env.XXXXXX)"
+  if sed "s|^${key}=.*$|${key}=${value}|" .env > "$temp_file"; then
+    mv "$temp_file" .env
+  else
+    rm -f "$temp_file"
+    return 1
   fi
 }
 
@@ -69,12 +83,11 @@ else
   GRAFANA_PASSWORD="$(gen_secret 6)"
 
   # Заменяем только те строки, что оставлены пустыми/шаблонными в .env.example
-  sed -i.bak "s|^JWT_SECRET=.*$|JWT_SECRET=${JWT_SECRET}|" .env
-  sed -i.bak "s|^ADMIN_DEFAULT_PASSWORD=.*$|ADMIN_DEFAULT_PASSWORD=${ADMIN_PASSWORD}|" .env
-  sed -i.bak "s|^POSTGRES_PASSWORD=.*$|POSTGRES_PASSWORD=${POSTGRES_PASSWORD}|" .env
-  sed -i.bak "s|^CLICKHOUSE_PASSWORD=.*$|CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}|" .env
-  sed -i.bak "s|^GRAFANA_PASSWORD=.*$|GRAFANA_PASSWORD=${GRAFANA_PASSWORD}|" .env
-  rm -f .env.bak
+  replace_env JWT_SECRET "$JWT_SECRET"
+  replace_env ADMIN_DEFAULT_PASSWORD "$ADMIN_PASSWORD"
+  replace_env POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
+  replace_env CLICKHOUSE_PASSWORD "$CLICKHOUSE_PASSWORD"
+  replace_env GRAFANA_PASSWORD "$GRAFANA_PASSWORD"
 
   ok ".env создан (JWT и пароли сгенерированы)"
   echo

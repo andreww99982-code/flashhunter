@@ -195,14 +195,14 @@ impl BundleBuilder {
     ///
     /// Используется, когда блок прошёл без нашего bundle (конкуренты заплатили больше).
     pub fn replace(&self, bundle: &Bundle, bump_pct: u64) -> Bundle {
-        let factor = (100 + bump_pct as u128) / 100;
+        let factor = 100 + bump_pct as u128;
         let txs = bundle
             .txs
             .iter()
             .cloned()
             .map(|mut tx| {
-                tx.max_fee_per_gas = tx.max_fee_per_gas * factor;
-                tx.max_priority_fee_per_gas = tx.max_priority_fee_per_gas * factor;
+                tx.max_fee_per_gas = tx.max_fee_per_gas * factor / 100;
+                tx.max_priority_fee_per_gas = tx.max_priority_fee_per_gas * factor / 100;
                 tx
             })
             .collect();
@@ -231,7 +231,7 @@ fn fh_chain_access_suggest(base_fee_wei: u128, priority_fee_wei: u128, bump_pct:
 }
 
 /// Транзакция-чаевые билдеру (часть релеев требует явную «плату за включение»).
-pub fn tip_tx(sender: Address, builder: Address, tip_usd: f64, native_price_usd: f64, nonce: u64, chain: ChainId) -> BundleTx {
+pub fn tip_tx(_sender: Address, builder: Address, tip_usd: f64, native_price_usd: f64, nonce: u64, chain: ChainId) -> BundleTx {
     let value = if native_price_usd > 0.0 { (tip_usd / native_price_usd * 1e18) as u128 } else { 0 };
     BundleTx {
         to: builder,

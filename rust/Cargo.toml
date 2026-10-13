@@ -16,7 +16,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 authors = ["FlashHunter Team"]
-rust-version = "1.79"
+rust-version = "1.90"
 
 [workspace.dependencies]
 tokio = { version = "1.40", features = ["rt-multi-thread", "macros", "time", "sync", "signal"] }

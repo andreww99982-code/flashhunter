@@ -37,7 +37,7 @@ async fn main() -> Result<()> {
         warn!("в FLASHHUNTER_RPC_URLS нет ни одной сети — работаем в демо-режиме без сети");
     }
 
-    let mut indexer = PoolIndexer::default();
+    let indexer = PoolIndexer::default();
     let wallet = Address::from_hex(&std::env::var("EXECUTOR_ADDRESS").unwrap_or_else(|_| "0x".to_string() + &"00".repeat(20)))
         .unwrap_or(Address::ZERO);
 

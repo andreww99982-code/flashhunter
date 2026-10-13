@@ -16,7 +16,7 @@ RUN npm ci --no-audit --no-fund
 
 COPY ui/ ./
 # vite.config.ts кладёт сборку прямо в python/flashhunter/ui_static (outDir задан в конфиге)
-RUN mkdir -p /ui_dist && npm run build && cp -r /ui/python/flashhunter/ui_static/. /ui_dist/ 2>/dev/null || true
+RUN npm run build -- --outDir /ui/dist
 
 # ---------------------------------------------------------------------------
 # Ступень 2: рантайм приложения
@@ -47,7 +47,7 @@ RUN pip install --upgrade pip && pip install "./python[cluster]"
 
 COPY python/ ./python/
 # Готовая SPA из ступени 1 (перекрывает возможный «пустой» каталог в репозитории)
-COPY --from=ui-builder /ui_dist/ ./python/flashhunter/ui_static/
+COPY --from=ui-builder /ui/dist/ ./python/flashhunter/ui_static/
 
 # Каталог для SQLite-базы и данных (монтируется volume-ом в compose)
 RUN mkdir -p /data && useradd --create-home --uid 10001 flashhunter && chown -R flashhunter:flashhunter /app /data

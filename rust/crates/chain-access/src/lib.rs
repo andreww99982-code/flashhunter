@@ -4,7 +4,7 @@
 //! общаемся мы с нодой, с архивным RPC или с фейком в тестах.
 
 use async_trait::async_trait;
-use fh_shared::{gwei_to_wei, ChainId};
+use fh_shared::ChainId;
 use std::collections::HashMap;
 use std::sync::Arc;
 

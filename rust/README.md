@@ -7,7 +7,7 @@
 ```
 rust/
 ├── Cargo.toml            # воркспейс: 8 членов + единые версии зависимостей
-├── rust-toolchain.toml   # канал 1.82 + rustfmt + clippy (одинаково у всех и в CI)
+├── rust-toolchain.toml   # канал 1.90 + rustfmt + clippy (одинаково у всех и в CI)
 └── crates/
     ├── shared/           # адреса, chain id, конфигурация из ENV, gwei-хелперы
     ├── chain-access/     # провайдеры RPC: состояние чейна, голова, комиссии, пул с ротацией
