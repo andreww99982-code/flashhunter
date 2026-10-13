@@ -19,6 +19,7 @@ interface WalletRow {
   balance_usd: number;
   native_balance: number;
   has_key: boolean;
+  is_trading: boolean;
   hsm_ref: string | null;
 }
 
@@ -47,7 +48,7 @@ export function Wallets() {
   const [privateKey, setPrivateKey] = useState('');
   const [sweepOpen, setSweepOpen] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [newWallet, setNewWallet] = useState({ name: '', address: '', private_key: '', is_hot: true });
+  const [newWallet, setNewWallet] = useState({ name: '', address: '', private_key: '', is_hot: true, chain_scope: '1,8453' });
 
   const columns: Column<WalletRow>[] = [
     {
@@ -79,10 +80,31 @@ export function Wallets() {
         ),
     },
     {
+      key: 'trading',
+      title: 'Торговля',
+      render: (row) => row.is_trading ? <span className="pill pill-profit">активный signer</span> : <span className="pill">не выбран</span>,
+    },
+    {
       key: 'actions',
       title: '',
       render: (row) => (
         <div className="flex gap-2">
+          {row.is_hot && row.has_key && !row.is_trading && (
+            <button
+              className="btn btn-tonal !px-3 !py-1.5 text-xs"
+              onClick={async () => {
+                try {
+                  await api.post(`/settings/trading-wallet/${row.id}`);
+                  push('success', 'Торговый кошелёк выбран. Перезапустите сервис, чтобы применить signer.');
+                  await wallets.refetch();
+                } catch (error) {
+                  push('error', error instanceof Error ? error.message : 'Не удалось выбрать торговый кошелёк');
+                }
+              }}
+            >
+              Выбрать для торгов
+            </button>
+          )}
           <button className="btn btn-outline !px-3 !py-1.5 text-xs" onClick={() => setKeyFor(row)}>
             <KeyRound size={13} /> Ключ
           </button>
@@ -140,6 +162,7 @@ export function Wallets() {
               <input className="field" placeholder="Имя (напр. hot-arb-1)" value={newWallet.name} onChange={(e) => setNewWallet({ ...newWallet, name: e.target.value })} />
               <input className="field num" placeholder="0x-адрес" value={newWallet.address} onChange={(e) => setNewWallet({ ...newWallet, address: e.target.value })} />
               <input className="field num" type="password" placeholder="Приватный ключ (0x…)" value={newWallet.private_key} onChange={(e) => setNewWallet({ ...newWallet, private_key: e.target.value })} />
+              <input className="field num" placeholder="Сети через запятую (например, 1,8453,42161)" value={newWallet.chain_scope} onChange={(e) => setNewWallet({ ...newWallet, chain_scope: e.target.value })} />
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={newWallet.is_hot} onChange={(e) => setNewWallet({ ...newWallet, is_hot: e.target.checked })} />
                 Горячий (для исполнения)
@@ -149,10 +172,13 @@ export function Wallets() {
                   className="btn btn-filled"
                   onClick={async () => {
                     try {
-                      await api.post('/wallets', { ...newWallet, chain_scope: [1, 8453] });
+                      await api.post('/wallets', {
+                        ...newWallet,
+                        chain_scope: newWallet.chain_scope.split(',').map((chain) => Number(chain.trim())).filter(Number.isInteger),
+                      });
                       push('success', 'Кошелёк добавлен');
                       setCreating(false);
-                      setNewWallet({ name: '', address: '', private_key: '', is_hot: true });
+                      setNewWallet({ name: '', address: '', private_key: '', is_hot: true, chain_scope: '1,8453' });
                       await wallets.refetch();
                     } catch (error) {
                       push('error', error instanceof Error ? error.message : 'Ошибка добавления');

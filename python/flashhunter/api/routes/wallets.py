@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 from flashhunter.api.deps import CriticalUser, CurrentUser, SessionDep, service, write_audit
 from flashhunter.config.secrets import encrypt_secret, mask_secret
-from flashhunter.db.models import Trade, TradeStatus, Wallet, WalletKind
+from flashhunter.db.models import Setting, Trade, TradeStatus, Wallet, WalletKind
 
 router = APIRouter(prefix="/wallets", tags=["wallets"])
 
@@ -43,6 +43,8 @@ class SetKeyRequest(BaseModel):
 async def list_wallets(user: CurrentUser, db: SessionDep) -> dict[str, Any]:
     """Список кошельков с балансами и областью применения (сети)."""
     rows = (await db.execute(select(Wallet))).scalars().all()
+    selected_trading = await db.get(Setting, "trading_wallet")
+    trading_wallet_id = (selected_trading.value or {}).get("wallet_id") if selected_trading else None
     svc = service()
     snapshot = svc.last_snapshot
     return {
@@ -57,6 +59,7 @@ async def list_wallets(user: CurrentUser, db: SessionDep) -> dict[str, Any]:
                 "balance_usd": float(w.balance_usd),
                 "native_balance": float(w.native_balance),
                 "has_key": bool(w.encrypted_key),
+                "is_trading": w.id == trading_wallet_id,
                 "hsm_ref": w.hsm_ref,
                 "created_at": w.created_at.isoformat(),
             }

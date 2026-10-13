@@ -118,6 +118,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with session_scope() as session:
         created = await seed_all(session)
         log.info("seed: %s", created)
+        await settings_routes.load_runtime_config(session)
 
     svc = get_strategy_service()
     if os.environ.get("FLASHHUNTER_DISABLE_ORCHESTRATOR", "").lower() not in {"1", "true", "yes"}:

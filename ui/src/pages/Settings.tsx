@@ -19,6 +19,18 @@ interface SettingsResponse {
   strategies_available: string[];
 }
 
+interface RuntimeConfigField {
+  name: string;
+  label: string;
+  category: string;
+  kind: 'boolean' | 'number' | 'list' | 'select' | 'secret' | 'text';
+  value: unknown;
+  configured: boolean;
+  masked: string | null;
+  choices: (string | number)[];
+  description: string;
+}
+
 const EDITABLE: { key: string; label: string; hint: string }[] = [
   { key: 'daily_loss_limit_usd', label: 'Дневной лимит убытка, $', hint: 'при превышении — автоматический kill-switch' },
   { key: 'hourly_loss_limit_usd', label: 'Часовой лимит убытка, $', hint: 'защита от серии ревертов' },
@@ -31,6 +43,7 @@ const EDITABLE: { key: string; label: string; hint: string }[] = [
 
 export function SettingsPage() {
   const { data, refetch } = useApi<SettingsResponse>('/settings', 12000);
+  const runtimeConfig = useApi<{ fields: RuntimeConfigField[]; overrides: string[] }>('/settings/config', 30000);
   const { user, refresh } = useAuth();
   const { push } = useToast();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -38,6 +51,23 @@ export function SettingsPage() {
   const [totp, setTotp] = useState<{ secret: string; uri: string; qr: string } | null>(null);
   const [totpCode, setTotpCode] = useState('');
   const [newKey, setNewKey] = useState({ provider: 'etherscan', key: '' });
+  const [configDrafts, setConfigDrafts] = useState<Record<string, unknown>>({});
+
+  const saveConfig = async (field: RuntimeConfigField) => {
+    const value = configDrafts[field.name] ?? field.value;
+    try {
+      const result = await api.put<{ restart_required: boolean }>('/settings/config', { values: { [field.name]: value } });
+      setConfigDrafts((previous) => {
+        const next = { ...previous };
+        delete next[field.name];
+        return next;
+      });
+      push('success', result.restart_required ? 'Настройка сохранена. Перезапустите сервис для применения.' : 'Настройка сохранена');
+      await runtimeConfig.refetch();
+    } catch (error) {
+      push('error', error instanceof Error ? error.message : 'Не удалось сохранить настройку');
+    }
+  };
 
   useEffect(() => {
     if (!data) return;
@@ -255,6 +285,93 @@ export function SettingsPage() {
           </GlassCard>
         </div>
       </div>
+
+      <GlassCard
+        title="Полная конфигурация"
+        subtitle="Параметры окружения, RPC, исполнения, риска и уведомлений. Секреты никогда не показываются повторно."
+      >
+        <div className="mb-3 rounded-xl border border-[var(--accent-warn)]/30 bg-[var(--accent-warn)]/5 p-3 text-xs text-[var(--text-2)]">
+          Изменения сохраняются в базе. Для параметров, влияющих на уже запущенные соединения и компоненты,
+          потребуется перезапуск сервиса. Приватные ключи торгового кошелька задаются на странице «Кошельки».
+        </div>
+        <div className="space-y-3">
+          {Object.entries(
+            (runtimeConfig.data?.fields ?? []).reduce<Record<string, RuntimeConfigField[]>>((groups, field) => {
+              (groups[field.category] ??= []).push(field);
+              return groups;
+            }, {}),
+          ).map(([category, fields]) => (
+            <details key={category} className="glass rounded-2xl p-4" open={category === 'Сети и RPC'}>
+              <summary className="cursor-pointer text-sm font-semibold">{category} <span className="text-xs text-[var(--text-3)]">({fields.length})</span></summary>
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                {fields.map((field) => {
+                  const edited = Object.hasOwn(configDrafts, field.name);
+                  const value = edited ? configDrafts[field.name] : field.value;
+                  return (
+                    <div key={field.name} className="min-w-0">
+                      <label className="mb-1 block text-[11px] uppercase tracking-wider text-[var(--text-3)]">
+                        {field.label}
+                      </label>
+                      {field.kind === 'boolean' ? (
+                        <label className="flex min-h-11 items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(value)}
+                            onChange={(event) => setConfigDrafts((previous) => ({ ...previous, [field.name]: event.target.checked }))}
+                          />
+                          {Boolean(value) ? 'Включено' : 'Выключено'}
+                        </label>
+                      ) : field.kind === 'select' ? (
+                        <select
+                          className="field"
+                          value={String(value ?? '')}
+                          onChange={(event) => setConfigDrafts((previous) => ({ ...previous, [field.name]: event.target.value }))}
+                        >
+                          {field.choices.map((choice) => <option key={choice} value={choice}>{choice}</option>)}
+                        </select>
+                      ) : field.kind === 'list' ? (
+                        <textarea
+                          className="field num min-h-20"
+                          value={Array.isArray(value) ? value.join(', ') : String(value ?? '')}
+                          placeholder="Значения через запятую"
+                          onChange={(event) => {
+                            const values = event.target.value.split(',').map((part) => part.trim()).filter(Boolean);
+                            setConfigDrafts((previous) => ({
+                              ...previous,
+                              [field.name]: field.name === 'strat_arb_chains' ? values.map(Number) : values,
+                            }));
+                          }}
+                        />
+                      ) : (
+                        <input
+                          className="field num"
+                          type={field.kind === 'secret' ? 'password' : field.kind === 'number' ? 'number' : 'text'}
+                          value={field.kind === 'secret' ? String(configDrafts[field.name] ?? '') : String(value ?? '')}
+                          placeholder={field.kind === 'secret' ? (field.configured ? `Настроено: ${field.masked}; введите новое значение для замены` : 'Не задано') : ''}
+                          onChange={(event) => setConfigDrafts((previous) => ({
+                            ...previous,
+                            [field.name]: field.kind === 'number' ? Number(event.target.value) : event.target.value,
+                          }))}
+                        />
+                      )}
+                      <div className="mt-2 flex items-center justify-between gap-2">
+                        <span className="break-all text-[10px] text-[var(--text-3)]">{field.description || field.name}</span>
+                        <button
+                          className="btn btn-tonal shrink-0 !px-3 !py-1.5 text-xs"
+                          disabled={!edited || (field.kind === 'secret' && !String(configDrafts[field.name] ?? ''))}
+                          onClick={() => void saveConfig(field)}
+                        >
+                          Сохранить
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </details>
+          ))}
+        </div>
+      </GlassCard>
 
       <GlassCard
         title="API-ключи внешних сервисов"

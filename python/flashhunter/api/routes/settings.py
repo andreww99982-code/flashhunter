@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import time
+from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 from sqlalchemy import select
 
 from flashhunter.api.deps import CriticalUser, CurrentUser, SessionDep, service, write_audit
+from flashhunter.config.secrets import decrypt_secret, encrypt_secret, mask_secret
+from flashhunter.config.settings import Settings, get_settings
 from flashhunter.db.models import ApiKeyEncrypted, RiskLimit, Setting
+from flashhunter.db.models import Wallet
 from flashhunter.db.models import utcnow
 from flashhunter.strategies.service import STRATEGY_CLASSES
 
@@ -47,6 +51,205 @@ class ModeSwitchRequest(BaseModel):
     live: bool
     confirmation: str = Field(default="", description="Для перехода в live нужно ввести слово LIVE")
     totp: str | None = None
+
+
+class RuntimeConfigUpdate(BaseModel):
+    """Validated runtime configuration; secret values are encrypted at rest."""
+
+    values: dict[str, Any]
+
+
+def _config_secret(name: str, field: Any) -> bool:
+    annotation = field.annotation
+    return annotation is SecretStr or any(
+        marker in name.lower()
+        for marker in ("password", "secret", "private_key", "rpc_http", "rpc_ws", "relay_url", "webhook")
+    )
+
+
+def _config_kind(field: Any) -> str:
+    annotation = field.annotation
+    if annotation is bool:
+        return "boolean"
+    if annotation in (int, float):
+        return "number"
+    if annotation is list[str] or annotation is list[int]:
+        return "list"
+    if getattr(annotation, "__origin__", None) is not None and str(annotation).startswith("typing.Literal"):
+        return "select"
+    return "text"
+
+
+def _config_category(name: str) -> str:
+    if name.startswith(("eth_", "arb_", "base_", "op_", "bsc_", "polygon_", "avalanche_", "live_")):
+        return "Сети и RPC"
+    if name.startswith(("strat_",)):
+        return "Стратегии"
+    if name.startswith(("exec_", "flashloan_", "liquidator_", "jit_", "keeper_")):
+        return "Исполнение и контракты"
+    if name.startswith(("risk_", "cold_wallet_", "sweep_")):
+        return "Риск и кошельки"
+    if name.startswith(("alert_", "telegram_", "discord_")):
+        return "Уведомления"
+    if name.startswith(("db_", "sqlite_", "postgres_", "clickhouse_", "redis_", "nats_")):
+        return "Хранилища"
+    if name.startswith(("api_", "jwt_", "admin_", "cors_", "session_")):
+        return "API и безопасность"
+    return "Общие"
+
+
+def _field_value(value: Any) -> Any:
+    if isinstance(value, SecretStr):
+        return value.get_secret_value()
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, tuple):
+        return list(value)
+    return value
+
+
+def _apply_settings(target: Settings, source: Settings) -> None:
+    target.__dict__.update(source.__dict__)
+
+
+def _config_secret_values(row: Setting | None) -> dict[str, Any]:
+    if row is None:
+        return {}
+    values = dict(row.value or {})
+    for name, value in list(values.items()):
+        if isinstance(value, dict) and value.get("encrypted"):
+            values[name] = decrypt_secret(value["encrypted"])
+    return values
+
+
+def _settings_with_overrides(overrides: dict[str, Any]) -> Settings:
+    current = get_settings()
+    alias_values = {
+        field.alias or name: _field_value(getattr(current, name))
+        for name, field in Settings.model_fields.items()
+    }
+    for name, value in overrides.items():
+        field = Settings.model_fields.get(name)
+        if field is None:
+            raise ValueError(f"unknown setting: {name}")
+        alias_values[field.alias or name] = value
+    return Settings.model_validate(alias_values)
+
+
+async def load_runtime_config(db: Any) -> None:
+    """Applies persisted panel configuration before services are constructed."""
+    settings = get_settings()
+    row = await db.get(Setting, "runtime_config")
+    overrides = _config_secret_values(row)
+    selected = await db.get(Setting, "trading_wallet")
+    if selected and (wallet_id := (selected.value or {}).get("wallet_id")):
+        wallet = await db.get(Wallet, wallet_id)
+        if wallet and wallet.encrypted_key:
+            overrides["keeper_private_key"] = decrypt_secret(wallet.encrypted_key)
+    if overrides:
+        try:
+            _apply_settings(settings, _settings_with_overrides(overrides))
+        except (ValueError, TypeError):
+            log.exception("Persisted settings are invalid; keeping environment configuration")
+
+
+_CONFIG_EXCLUDED = {
+    "db_mode",
+    "sqlite_path",
+    "postgres_dsn",
+    "clickhouse_dsn",
+    "redis_url",
+    "nats_url",
+    "jwt_secret",
+    "admin_default_password",
+}
+
+
+@router.get("/config")
+async def get_runtime_config(user: CurrentUser, db: SessionDep) -> dict[str, Any]:
+    """Panel-visible settings schema and current values; secrets are never returned."""
+    current = get_settings()
+    row = await db.get(Setting, "runtime_config")
+    overrides = (row.value or {}) if row else {}
+    fields = []
+    for name, field in Settings.model_fields.items():
+        if name in _CONFIG_EXCLUDED:
+            continue
+        secret = _config_secret(name, field)
+        value = getattr(current, name)
+        masked = _field_value(value) if secret else None
+        fields.append(
+            {
+                "name": name,
+                "label": field.alias or name,
+                "category": _config_category(name),
+                "kind": "secret" if secret else _config_kind(field),
+                "value": None if secret else _field_value(value),
+                "configured": bool(masked) if secret else True,
+                "masked": mask_secret(masked) if secret and masked else None,
+                "choices": list(field.annotation.__args__)
+                if _config_kind(field) == "select" and hasattr(field.annotation, "__args__")
+                else [],
+                "description": field.description or "",
+            }
+        )
+    return {"fields": fields, "overrides": sorted(overrides)}
+
+
+@router.put("/config")
+async def update_runtime_config(
+    payload: RuntimeConfigUpdate, request: Request, user: CriticalUser, db: SessionDep
+) -> dict[str, Any]:
+    """Validates and saves the submitted config; changed settings apply after restart."""
+    if not payload.values:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "no settings provided")
+    unknown = set(payload.values) - (set(Settings.model_fields) - _CONFIG_EXCLUDED)
+    if unknown:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"unsupported settings: {', '.join(sorted(unknown))}")
+    try:
+        candidate = _settings_with_overrides(payload.values)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+
+    row = await db.get(Setting, "runtime_config")
+    stored = dict(row.value or {}) if row else {}
+    for name in payload.values:
+        value = _field_value(getattr(candidate, name))
+        stored[name] = {"encrypted": encrypt_secret(str(value))} if _config_secret(name, Settings.model_fields[name]) else value
+    if row is None:
+        row = Setting(key="runtime_config", value=stored)
+        db.add(row)
+    else:
+        row.value = stored
+    _apply_settings(get_settings(), candidate)
+    await write_audit(db, request, user.username, "runtime_config_update", {"fields": sorted(payload.values)})
+    return {"ok": True, "restart_required": True, "updated": sorted(payload.values)}
+
+
+@router.post("/trading-wallet/{wallet_id}")
+async def set_trading_wallet(
+    wallet_id: int, request: Request, user: CriticalUser, db: SessionDep
+) -> dict[str, Any]:
+    """Selects a hot wallet as the trade signer; encrypted key is only read at startup."""
+    wallet = await db.get(Wallet, wallet_id)
+    if wallet is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "wallet not found")
+    if not wallet.is_hot or not wallet.encrypted_key:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "trading wallet must be hot and have a private key")
+    if get_settings().live_chain_id not in (wallet.chain_scope or []):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "wallet is not enabled for the active chain")
+    from eth_account import Account
+
+    private_key = decrypt_secret(wallet.encrypted_key)
+    if Account.from_key(private_key).address.lower() != wallet.address.lower():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "wallet address does not match its private key")
+    setting = await db.get(Setting, "trading_wallet")
+    if setting is None:
+        db.add(Setting(key="trading_wallet", value={"wallet_id": wallet.id}))
+    else:
+        setting.value = {"wallet_id": wallet.id}
+    await write_audit(db, request, user.username, "trading_wallet_select", {"wallet_id": wallet.id})
+    return {"ok": True, "wallet_id": wallet.id, "address": wallet.address, "restart_required": True}
 
 
 @router.get("")

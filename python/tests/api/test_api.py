@@ -29,6 +29,24 @@ def test_health_and_public_config(api_client) -> None:
     assert "jwt_secret" not in config
 
 
+def test_runtime_config_api_lists_fields_without_revealing_secrets(api_client) -> None:
+    response = api_client.get(f"{API}/settings/config")
+    assert response.status_code == 200
+    fields = {field["name"]: field for field in response.json()["fields"]}
+    assert fields["eth_rpc_http"]["kind"] == "secret"
+    assert fields["eth_rpc_http"]["value"] is None
+    assert "keeper_private_key" in fields
+    assert "risk_daily_loss_limit_usd" in fields
+
+
+def test_runtime_config_api_validates_values(api_client) -> None:
+    response = api_client.put(f"{API}/settings/config", json={"values": {"api_port": "not-a-port"}})
+    assert response.status_code == 422
+
+    unsupported = api_client.put(f"{API}/settings/config", json={"values": {"jwt_secret": "must-not-be-editable-here"}})
+    assert unsupported.status_code == 422
+
+
 def test_metrics_endpoint_is_prometheus_text(api_client) -> None:
     """/metrics — Prometheus text format с ключевыми метриками."""
     response = api_client.get("/metrics")
