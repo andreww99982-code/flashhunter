@@ -36,6 +36,7 @@ flashhunter/chain/rpc.py
 flashhunter/chain/signer.py
 flashhunter/chain/uniswap_math.py
 flashhunter/config/__init__.py
+flashhunter/config/panel_config.py
 flashhunter/config/secrets.py
 flashhunter/config/settings.py
 flashhunter/db/__init__.py

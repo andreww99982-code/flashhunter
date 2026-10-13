@@ -292,7 +292,7 @@ export function SettingsPage() {
 
       <GlassCard
         title="Полная конфигурация"
-        subtitle="Все параметры приложения меняются здесь. Для первого запуска файл .env не требуется."
+        subtitle="Параметры приложения, торговли и хранения данных настраиваются здесь; .env не требуется."
       >
         <div className="mb-3 rounded-xl border border-[var(--accent-warn)]/30 bg-[var(--accent-warn)]/5 p-3 text-xs text-[var(--text-2)]">
           Настройки сохраняются между перезапусками и загружаются до подключения к базе. Первый запуск использует
@@ -380,9 +380,10 @@ export function SettingsPage() {
       </GlassCard>
 
       {(runtimeConfig.data?.locked_fields.length ?? 0) > 0 && (
-        <GlassCard title="Параметры с отдельным управлением" subtitle="Они уже настраиваются в соответствующих разделах">
+        <GlassCard title="Системные исключения" subtitle="Не относятся к прикладной конфигурации">
           <p className="mb-3 text-xs text-[var(--text-3)]">
-            Пароль учётной записи меняется в профиле. Имитация рынка отключена, используются только реальные рыночные данные.
+            Пароль меняется в профиле. Имитация рынка отключена. Адрес и порт слушающего API фиксируются
+            точкой запуска, чтобы панель не могла отключить сама себя.
           </p>
           <div className="flex flex-wrap gap-2">
             {runtimeConfig.data?.locked_fields.map((field) => (

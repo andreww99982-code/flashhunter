@@ -124,6 +124,10 @@ def _field_value(value: Any) -> Any:
     return value
 
 
+def _apply_settings(target: Settings, source: Settings) -> None:
+    target.__dict__.update(source.__dict__)
+
+
 def _config_secret_values(row: Setting | None) -> dict[str, Any]:
     if row is None:
         return {}
@@ -147,7 +151,7 @@ def _panel_config_values() -> dict[str, Any]:
 async def _upgrade_legacy_secrets(db: SessionDep, stored: dict[str, Any]) -> None:
     """Re-encrypt v1 secrets before a UI-driven JWT rotation changes legacy key derivation."""
     try:
-        for name, value in stored.items():
+        for _name, value in stored.items():
             encrypted = value.get("encrypted") if isinstance(value, dict) else None
             if isinstance(encrypted, str) and encrypted.startswith("local:v1:"):
                 value["encrypted"] = encrypt_secret(decrypt_secret(encrypted))
@@ -200,6 +204,8 @@ async def load_runtime_config(db: Any) -> None:
 _CONFIG_EXCLUDED = {
     "admin_default_password",
     "mock_market_data",
+    "api_host",
+    "api_port",
 }
 
 
@@ -241,9 +247,12 @@ async def get_runtime_config(user: CurrentUser, db: SessionDep) -> dict[str, Any
             "label": Settings.model_fields[name].alias or name,
             "category": _config_category(name),
             "reason": (
-                "Отключено: система должна использовать только реальные рыночные данные."
-                if name == "mock_market_data"
-                else "Пароль учётной записи меняется через профиль пользователя."
+                {
+                    "mock_market_data": "Отключено: система должна использовать только реальные рыночные данные.",
+                    "admin_default_password": "Пароль учётной записи меняется через профиль пользователя.",
+                    "api_host": "Адрес прослушивания фиксируется точкой запуска сервиса.",
+                    "api_port": "Порт контейнера фиксирован; внешний порт задаётся конфигурацией Docker.",
+                }[name]
             ),
         }
         for name in sorted(_CONFIG_EXCLUDED)

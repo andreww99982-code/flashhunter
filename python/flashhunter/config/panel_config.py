@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +31,7 @@ def load_panel_settings() -> dict[str, Any]:
 def save_panel_settings(values: dict[str, Any]) -> None:
     path = settings_file_path()
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(path.parent, 0o700)
+    path.parent.chmod(0o700)
     merged = load_panel_settings()
     merged.update(values)
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
@@ -40,11 +41,9 @@ def save_panel_settings(values: dict[str, Any]) -> None:
             json.dump({"values": merged}, stream, ensure_ascii=False, separators=(",", ":"))
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        Path(temporary).replace(path)
     except Exception:
-        try:
+        with suppress(OSError):
             os.close(descriptor)
-        except OSError:
-            pass
         Path(temporary).unlink(missing_ok=True)
         raise

@@ -10,8 +10,8 @@ import os
 import sys
 import tempfile
 import uuid
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import AsyncIterator
 
 import pytest
 
@@ -33,8 +33,8 @@ os.environ["FLASHHUNTER_MOCK_MARKET_DATA"] = "true"
 os.environ["FLASHHUNTER_FORCE_PASSWORD_CHANGE"] = "false"
 os.environ["FLASHHUNTER_LOG_LEVEL"] = "WARNING"
 
-from flashhunter.db.session import init_models  # noqa: E402
 from flashhunter.db.seed import seed_all  # noqa: E402
+from flashhunter.db.session import init_models  # noqa: E402
 from flashhunter.market.mock import MockMarketSource  # noqa: E402
 from flashhunter.strategies.base import BlockCtx  # noqa: E402
 from flashhunter.strategies.math.adapters import register_decimals  # noqa: E402

@@ -39,6 +39,7 @@ def test_runtime_config_api_lists_fields_without_revealing_secrets(api_client) -
     assert "risk_daily_loss_limit_usd" in fields
     locked = {field["name"]: field for field in response.json()["locked_fields"]}
     assert locked["mock_market_data"]["reason"].startswith("Отключено")
+    assert {"api_host", "api_port", "admin_default_password"} <= set(locked)
 
 
 def test_runtime_config_api_validates_values(api_client) -> None:

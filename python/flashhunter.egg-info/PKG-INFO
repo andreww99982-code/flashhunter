@@ -24,6 +24,7 @@ Requires-Dist: eth-utils>=5.0
 Requires-Dist: eth-abi>=5.1
 Requires-Dist: eth-account>=0.13
 Requires-Dist: websockets>=13.0
+Requires-Dist: cryptography>=50.0.0
 Provides-Extra: cluster
 Requires-Dist: asyncpg>=0.30; extra == "cluster"
 Requires-Dist: clickhouse-connect>=0.8; extra == "cluster"

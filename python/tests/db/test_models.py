@@ -174,7 +174,7 @@ def test_secrets_encrypt_decrypt_and_mask() -> None:
     """Локальное шифрование секретов: обратимо, детектирует подмену, маскирует хвост."""
     secret = "0x" + "a1" * 32
     token = encrypt_secret(secret)
-    assert token.startswith("local:v1:")
+    assert token.startswith("local:v2:")
     assert secret not in token
     assert decrypt_secret(token) == secret
 

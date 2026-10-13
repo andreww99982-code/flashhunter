@@ -28,6 +28,7 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     FLASHHUNTER_ENV=dev \
     FLASHHUNTER_DB_MODE=sqlite \
+    FLASHHUNTER_SETTINGS_FILE=/data/settings.json \
     SQLITE_PATH=/data/flashhunter.db \
     MOCK_MARKET_DATA=false \
     API_HOST=0.0.0.0 \

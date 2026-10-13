@@ -1,8 +1,8 @@
 """Конфигурация FlashHunter.
 
-Все параметры читаются из переменных окружения / файла ``.env`` через
-``pydantic-settings``. Секреты в production подгружаются из Vault (см. ``load_secrets``),
-но структура настроек остаётся той же.
+Настройки панели загружаются первыми из защищённого локального файла, затем используются
+переменные окружения и ``.env``. Это позволяет менять и параметры подключения к БД
+через UI: сохранённая конфигурация читается до создания соединения.
 """
 
 from __future__ import annotations
@@ -293,7 +293,11 @@ class Settings(BaseSettings):
         """Проверки инвариантов: prod-режим не допускает небезопасных значений по умолчанию."""
         if self.env == "prod":
             jwt_secret = self.jwt_secret.get_secret_value()
-            if jwt_secret.startswith("dev-insecure") or len(jwt_secret) < 32:
+            if (
+                jwt_secret.startswith("dev-insecure")
+                or "change-me" in jwt_secret.lower()
+                or len(jwt_secret) < 32
+            ):
                 raise ValueError("JWT_SECRET must contain at least 32 characters in prod")
             if self.mock_market_data:
                 raise ValueError("MOCK_MARKET_DATA must be false in prod")
