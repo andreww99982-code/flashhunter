@@ -46,7 +46,7 @@ def test_runtime_config_api_validates_values(api_client) -> None:
     assert response.status_code == 422
 
     unsupported = api_client.put(
-        f"{API}/settings/config", json={"values": {"jwt_secret": "must-not-be-editable-here"}}
+        f"{API}/settings/config", json={"values": {"admin_default_password": "managed-in-profile"}}
     )
     assert unsupported.status_code == 422
 

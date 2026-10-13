@@ -36,6 +36,7 @@ services:
       FLASHHUNTER_AUTO_OPEN_BROWSER: "false"
       FLASHHUNTER_FORCE_PASSWORD_CHANGE: ${FLASHHUNTER_FORCE_PASSWORD_CHANGE:-true}
       FLASHHUNTER_DB_MODE: ${FLASHHUNTER_DB_MODE:-sqlite}
+      FLASHHUNTER_SETTINGS_FILE: /data/settings.json
       SQLITE_PATH: /data/flashhunter.db
       POSTGRES_DSN: ${POSTGRES_DSN:-postgresql+asyncpg://flashhunter:flashhunter@postgres:5432/flashhunter}
       CLICKHOUSE_DSN: ${CLICKHOUSE_DSN:-clickhouse://clickhouse:8123/flashhunter}

@@ -13,8 +13,31 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field, SecretStr, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
+
+from flashhunter.config.panel_config import load_panel_settings
+
+
+class PanelSettingsSource(PydanticBaseSettingsSource):
+    """Loads panel settings before DB and authentication initialize."""
+
+    def get_field_value(self, field: Any, field_name: str) -> tuple[Any, str, bool]:
+        return None, field_name, False
+
+    def __call__(self) -> dict[str, Any]:
+        from flashhunter.config.secrets import decrypt_secret
+
+        configured = load_panel_settings()
+        values = {}
+        for name, value in configured.items():
+            field = self.settings_cls.model_fields.get(name)
+            if field is None:
+                continue
+            if isinstance(value, dict) and value.get("encrypted"):
+                value = decrypt_secret(value["encrypted"])
+            values[field.alias or name] = value
+        return values
 
 
 class ChainRpc(BaseSettings):
@@ -40,6 +63,23 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return (
+            init_settings,
+            PanelSettingsSource(settings_cls),
+            env_settings,
+            dotenv_settings,
+            file_secret_settings,
+        )
+
     # --- 1. Общее ----------------------------------------------------------
     env: Literal["dev", "staging", "prod"] = Field(default="dev", alias="FLASHHUNTER_ENV")
     log_level: str = Field(default="INFO", alias="FLASHHUNTER_LOG_LEVEL")
@@ -51,7 +91,10 @@ class Settings(BaseSettings):
 
     # --- 2. Хранилища ------------------------------------------------------
     db_mode: Literal["sqlite", "postgres"] = Field(default="sqlite", alias="FLASHHUNTER_DB_MODE")
-    sqlite_path: str = Field(default="/data/flashhunter.db", alias="SQLITE_PATH")
+    sqlite_path: str = Field(
+        default_factory=lambda: str(Path.home() / ".flashhunter" / "flashhunter.db"),
+        alias="SQLITE_PATH",
+    )
     postgres_dsn: str = Field(
         default="postgresql+asyncpg://flashhunter:flashhunter@postgres:5432/flashhunter",
         alias="POSTGRES_DSN",
@@ -249,10 +292,9 @@ class Settings(BaseSettings):
     def _sanity(self) -> Settings:
         """Проверки инвариантов: prod-режим не допускает небезопасных значений по умолчанию."""
         if self.env == "prod":
-            if self.jwt_secret.get_secret_value().startswith("dev-insecure"):
-                raise ValueError("JWT_SECRET must be rotated before running in prod")
-            if self.admin_default_password.get_secret_value() == "admin":
-                raise ValueError("ADMIN_DEFAULT_PASSWORD must be changed in prod")
+            jwt_secret = self.jwt_secret.get_secret_value()
+            if jwt_secret.startswith("dev-insecure") or len(jwt_secret) < 32:
+                raise ValueError("JWT_SECRET must contain at least 32 characters in prod")
             if self.mock_market_data:
                 raise ValueError("MOCK_MARKET_DATA must be false in prod")
             if not self.rpc_endpoints(self.live_chain_id):

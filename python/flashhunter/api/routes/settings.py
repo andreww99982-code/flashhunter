@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from decimal import Decimal
 from typing import Any, Literal, get_args, get_origin
@@ -12,10 +13,12 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field, SecretStr
 from sqlalchemy import select
 
+from flashhunter.api.auth import verify_password
 from flashhunter.api.deps import CriticalUser, CurrentUser, SessionDep, service, write_audit
+from flashhunter.config.panel_config import load_panel_settings, save_panel_settings
 from flashhunter.config.secrets import decrypt_secret, encrypt_secret, mask_secret
 from flashhunter.config.settings import Settings, get_settings
-from flashhunter.db.models import ApiKeyEncrypted, RiskLimit, Setting, Wallet, utcnow
+from flashhunter.db.models import ApiKeyEncrypted, RiskLimit, Setting, User, Wallet, utcnow
 from flashhunter.strategies.service import STRATEGY_CLASSES
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -72,6 +75,9 @@ def _config_secret(name: str, field: Any) -> bool:
             "rpc_ws",
             "rpc_fallback",
             "relay_url",
+            "_dsn",
+            "redis_url",
+            "nats_url",
             "webhook",
         )
     )
@@ -118,10 +124,6 @@ def _field_value(value: Any) -> Any:
     return value
 
 
-def _apply_settings(target: Settings, source: Settings) -> None:
-    target.__dict__.update(source.__dict__)
-
-
 def _config_secret_values(row: Setting | None) -> dict[str, Any]:
     if row is None:
         return {}
@@ -130,6 +132,38 @@ def _config_secret_values(row: Setting | None) -> dict[str, Any]:
         if isinstance(value, dict) and value.get("encrypted"):
             values[name] = decrypt_secret(value["encrypted"])
     return values
+
+
+def _panel_config_values() -> dict[str, Any]:
+    values = load_panel_settings()
+    return {
+        name: decrypt_secret(value["encrypted"])
+        if isinstance(value, dict) and isinstance(value.get("encrypted"), str)
+        else value
+        for name, value in values.items()
+    }
+
+
+async def _upgrade_legacy_secrets(db: SessionDep, stored: dict[str, Any]) -> None:
+    """Re-encrypt v1 secrets before a UI-driven JWT rotation changes legacy key derivation."""
+    try:
+        for name, value in stored.items():
+            encrypted = value.get("encrypted") if isinstance(value, dict) else None
+            if isinstance(encrypted, str) and encrypted.startswith("local:v1:"):
+                value["encrypted"] = encrypt_secret(decrypt_secret(encrypted))
+        wallets = (await db.execute(select(Wallet))).scalars().all()
+        for wallet in wallets:
+            if wallet.encrypted_key and wallet.encrypted_key.startswith("local:v1:"):
+                wallet.encrypted_key = encrypt_secret(decrypt_secret(wallet.encrypted_key))
+        api_keys = (await db.execute(select(ApiKeyEncrypted))).scalars().all()
+        for api_key in api_keys:
+            if api_key.encrypted_key.startswith("local:v1:"):
+                api_key.encrypted_key = encrypt_secret(decrypt_secret(api_key.encrypted_key))
+    except (ValueError, OSError) as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "cannot rotate JWT secret until existing encrypted credentials can be decrypted",
+        ) from exc
 
 
 def _settings_with_overrides(overrides: dict[str, Any]) -> Settings:
@@ -150,7 +184,7 @@ async def load_runtime_config(db: Any) -> None:
     """Applies persisted panel configuration before services are constructed."""
     settings = get_settings()
     row = await db.get(Setting, "runtime_config")
-    overrides = _config_secret_values(row)
+    overrides = _config_secret_values(row) | _panel_config_values()
     selected = await db.get(Setting, "trading_wallet")
     if selected and (wallet_id := (selected.value or {}).get("wallet_id")):
         wallet = await db.get(Wallet, wallet_id)
@@ -164,13 +198,6 @@ async def load_runtime_config(db: Any) -> None:
 
 
 _CONFIG_EXCLUDED = {
-    "db_mode",
-    "sqlite_path",
-    "postgres_dsn",
-    "clickhouse_dsn",
-    "redis_url",
-    "nats_url",
-    "jwt_secret",
     "admin_default_password",
     "mock_market_data",
 }
@@ -181,13 +208,19 @@ async def get_runtime_config(user: CurrentUser, db: SessionDep) -> dict[str, Any
     """Panel-visible settings schema and current values; secrets are never returned."""
     current = get_settings()
     row = await db.get(Setting, "runtime_config")
-    overrides = (row.value or {}) if row else {}
+    overrides = dict(row.value or {}) if row else {}
+    overrides.update(load_panel_settings())
+    effective = current
+    try:
+        effective = _settings_with_overrides(_config_secret_values(row) | _panel_config_values())
+    except (ValueError, TypeError):
+        log.exception("Unable to load saved settings for display")
     fields = []
     for name, field in Settings.model_fields.items():
         if name in _CONFIG_EXCLUDED:
             continue
         secret = _config_secret(name, field)
-        value = getattr(current, name)
+        value = getattr(effective, name)
         masked = _field_value(value) if secret else None
         fields.append(
             {
@@ -210,7 +243,7 @@ async def get_runtime_config(user: CurrentUser, db: SessionDep) -> dict[str, Any
             "reason": (
                 "Отключено: система должна использовать только реальные рыночные данные."
                 if name == "mock_market_data"
-                else "Задаётся только до запуска сервиса через .env."
+                else "Пароль учётной записи меняется через профиль пользователя."
             ),
         }
         for name in sorted(_CONFIG_EXCLUDED)
@@ -236,21 +269,42 @@ async def update_runtime_config(
     except (ValueError, TypeError) as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
 
+    if candidate.env == "prod":
+        admins = (await db.execute(select(User).where(User.role == "admin"))).scalars().all()
+        if not admins or any(
+            admin.must_change_password or verify_password("admin", admin.password_hash)
+            for admin in admins
+        ):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "change the default administrator password in the profile before enabling production mode",
+            )
+
     row = await db.get(Setting, "runtime_config")
     stored = dict(row.value or {}) if row else {}
+    if "jwt_secret" in payload.values and not os.environ.get("VAULT_ADDR"):
+        await _upgrade_legacy_secrets(db, stored)
+    panel_updates: dict[str, Any] = {}
     for name in payload.values:
         value = _field_value(getattr(candidate, name))
-        stored[name] = (
+        encrypted_or_plain = (
             {"encrypted": encrypt_secret(str(value))}
             if _config_secret(name, Settings.model_fields[name])
             else value
         )
+        stored[name] = encrypted_or_plain
+        panel_updates[name] = encrypted_or_plain
+    try:
+        save_panel_settings(panel_updates)
+    except OSError as exc:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, "could not persist panel settings"
+        ) from exc
     if row is None:
         row = Setting(key="runtime_config", value=stored)
         db.add(row)
     else:
         row.value = stored
-    _apply_settings(get_settings(), candidate)
     await write_audit(db, request, user.username, "runtime_config_update", {"fields": sorted(payload.values)})
     return {"ok": True, "restart_required": True, "updated": sorted(payload.values)}
 

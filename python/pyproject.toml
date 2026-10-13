@@ -32,6 +32,7 @@ dependencies = [
     "eth-abi>=5.1",
     "eth-account>=0.13",
     "websockets>=13.0",
+    "cryptography>=50.0.0",
 ]
 
 [project.optional-dependencies]

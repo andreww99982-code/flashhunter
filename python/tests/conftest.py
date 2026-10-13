@@ -22,6 +22,7 @@ if str(ROOT) not in sys.path:
 # Изолированное окружение: своя SQLite-БД, без оркестратора, без автооткрытия браузера.
 _TMP = Path(tempfile.gettempdir())
 os.environ.setdefault("SQLITE_PATH", str(_TMP / f"fh_test_{uuid.uuid4().hex[:8]}.db"))
+os.environ.setdefault("FLASHHUNTER_SETTINGS_FILE", str(_TMP / f"fh_test_config_{uuid.uuid4().hex[:8]}.json"))
 os.environ["FLASHHUNTER_DISABLE_ORCHESTRATOR"] = "1"
 os.environ["FLASHHUNTER_AUTO_OPEN_BROWSER"] = "false"
 # Имя переменной совпадает с алиасом поля Settings (MOCK_MARKET_DATA): префикс
