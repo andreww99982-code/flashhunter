@@ -1,0 +1,32 @@
+# Конфигурация Foundry для FlashHunter (Solidity 0.8.24, оптимизатор под лимиты газа).
+[profile.default]
+src = "src"
+test = "test"
+script = "script"
+out = "out"
+libs = ["lib"]
+solc_version = "0.8.24"
+optimizer = true
+optimizer_runs = 1_000_000      # агрессивная оптимизация: каждая единица газа — деньги
+via_ir = true                   # обход stack-too-deep в контракте арбитража
+evm_version = "cancun"
+gas_reports = ["*"]
+fs_permissions = [{ access = "read", path = "./deployments" }]
+
+[profile.ci]
+verbosity = 3
+fuzz = { runs = 512 }
+invariant = { runs = 256, depth = 64 }
+
+[profile.echidna]
+invariant = { runs = 1000, depth = 128 }
+
+[rpc_endpoints]
+mainnet = "${ETH_RPC_URL}"
+base = "${BASE_RPC_URL}"
+arbitrum = "${ARBITRUM_RPC_URL}"
+
+[etherscan]
+mainnet = { key = "${ETHERSCAN_API_KEY}" }
+base = { key = "${BASESCAN_API_KEY}" }
+arbitrum = { key = "${ARBISCAN_API_KEY}" }

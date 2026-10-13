@@ -1,0 +1,15 @@
+# Конфигурация Echidna для FlashHunter (запуск: make echidna).
+# Проверка инвариантов контрактов арбитража и ликвидатора.
+testMode: assertion
+testLimit: 50000        # 50k вызовов — баланс между покрытием и временем CI
+shrinkLimit: 5000       # минимизация контрпримеров
+seqLen: 100             # длина последовательности вызовов
+contractAddr: "0x00a329c0648769A73afAc7F9381E08FB43dBEA72"
+deployer: "0x30000"
+sender: ["0x10000", "0x20000", "0x30000"]
+balanceAddr: 0xffffffff
+balanceContract: 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+filterFunctions: []
+cryticArgs: ["--compile-force-framework", "foundry"]
+coverage: true
+corpusDir: "echidna/corpus"

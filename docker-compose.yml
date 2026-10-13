@@ -1,0 +1,215 @@
+# FlashHunter: одна команда для запуска всего стека.
+#
+#   git clone <repo> && cd flashhunter && docker compose up -d
+#   → http://localhost:8000  (admin / admin, потребуется смена пароля)
+#
+# Профили:
+#   (без профиля)       — api: SQLite + мок-рынок, всё в одном контейнере
+#   --profile cluster   — + Postgres, ClickHouse, Redis (прод-хранилища)
+#   --profile observability — + Prometheus и Grafana (метрики и дашборды)
+#   --profile edge      — + nginx (TLS-терминация, rate-limit на /login)
+#
+# Переменные берутся из .env автоматически (docker compose читает его в корне проекта);
+# без .env подставляются значения по умолчанию ниже, поэтому запуск работает «из коробки».
+
+name: flashhunter
+
+services:
+  # ------------------------------------------------------------------ #
+  # API + панель + оркестратор: один процесс FastAPI на 0.0.0.0:8000
+  # ------------------------------------------------------------------ #
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.api
+    image: flashhunter/api:latest
+    container_name: flashhunter-api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      FLASHHUNTER_ENV: ${FLASHHUNTER_ENV:-dev}
+      FLASHHUNTER_LOG_LEVEL: ${FLASHHUNTER_LOG_LEVEL:-INFO}
+      FLASHHUNTER_LOG_JSON: ${FLASHHUNTER_LOG_JSON:-true}
+      FLASHHUNTER_DRY_RUN: ${FLASHHUNTER_DRY_RUN:-true}
+      # Автооткрытие браузера делает клиент по ссылке в логах; в контейнере не нужно
+      FLASHHUNTER_AUTO_OPEN_BROWSER: "false"
+      FLASHHUNTER_FORCE_PASSWORD_CHANGE: ${FLASHHUNTER_FORCE_PASSWORD_CHANGE:-true}
+      FLASHHUNTER_DB_MODE: ${FLASHHUNTER_DB_MODE:-sqlite}
+      SQLITE_PATH: /data/flashhunter.db
+      POSTGRES_DSN: ${POSTGRES_DSN:-postgresql+asyncpg://flashhunter:flashhunter@postgres:5432/flashhunter}
+      CLICKHOUSE_DSN: ${CLICKHOUSE_DSN:-clickhouse://clickhouse:8123/flashhunter}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      # Боевой рынок по умолчанию: настоящие RPC-данные. Мок включается только вручную.
+      MOCK_MARKET_DATA: ${MOCK_MARKET_DATA:-false}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production-please-32-chars}
+      ADMIN_DEFAULT_USER: ${ADMIN_DEFAULT_USER:-admin}
+      ADMIN_DEFAULT_PASSWORD: ${ADMIN_DEFAULT_PASSWORD:-admin}
+      # Риск-лимиты и режим исполнения
+      RISK_DAILY_LOSS_LIMIT_USD: ${RISK_DAILY_LOSS_LIMIT_USD:-500}
+      RISK_HOURLY_LOSS_LIMIT_USD: ${RISK_HOURLY_LOSS_LIMIT_USD:-150}
+      EXEC_MIN_PROFIT_USD: ${EXEC_MIN_PROFIT_USD:-5}
+      EXEC_MAX_GAS_GWEI: ${EXEC_MAX_GAS_GWEI:-120}
+      # RPC-ключи (заполняются в .env; в мок-режиме не требуются)
+      # RPC-ключи: без них работают публичные узлы (медленнее и с лимитами)
+      ETH_RPC_HTTP: ${ETH_RPC_HTTP:-}
+      ETH_RPC_WS: ${ETH_RPC_WS:-}
+      LIVE_CHAIN_ID: ${LIVE_CHAIN_ID:-1}
+      LIVE_WS_PENDING_TXS: ${LIVE_WS_PENDING_TXS:-false}
+      # Кипер: пусто = readonly (возможности считаются, транзакции не отправляются)
+      KEEPER_PRIVATE_KEY: ${KEEPER_PRIVATE_KEY:-}
+      KEEPER_KEY_FILE: ${KEEPER_KEY_FILE:-}
+      FLASHLOAN_ARBITRAGE_ADDRESS: ${FLASHLOAN_ARBITRAGE_ADDRESS:-}
+      ARB_RPC_HTTP: ${ARB_RPC_HTTP:-}
+      BASE_RPC_HTTP: ${BASE_RPC_HTTP:-}
+      # Алертинг
+      ALERT_TELEGRAM_TOKEN: ${ALERT_TELEGRAM_TOKEN:-}
+      ALERT_TELEGRAM_CHAT_ID: ${ALERT_TELEGRAM_CHAT_ID:-}
+      ALERT_DISCORD_WEBHOOK: ${ALERT_DISCORD_WEBHOOK:-}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+    volumes:
+      - fh_data:/data                     # SQLite-база и экспортированные отчёты
+      - ./migrations:/app/migrations:ro    # SQL-миграции доступны для ручного применения
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/v1/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # ------------------------------------------------------------------ #
+  # Прод-хранилища (профиль cluster): включается, когда нужен объём/аналитика
+  # ------------------------------------------------------------------ #
+  postgres:
+    image: postgres:16-alpine
+    container_name: flashhunter-postgres
+    profiles: ["cluster"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-flashhunter}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-flashhunter}
+      POSTGRES_DB: ${POSTGRES_DB:-flashhunter}
+      # Ключи для партиционирования и вьюх аналитики
+      TZ: UTC
+    volumes:
+      - fh_pg:/var/lib/postgresql/data
+      - ./migrations/postgres:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-flashhunter}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.10-alpine
+    container_name: flashhunter-clickhouse
+    profiles: ["cluster"]
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-flashhunter}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-flashhunter}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-flashhunter}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    volumes:
+      - fh_ch:/var/lib/clickhouse
+      - ./migrations/clickhouse:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${CLICKHOUSE_HTTP_PORT:-8123}:8123"
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8123/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: flashhunter-redis
+    profiles: ["cluster"]
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - fh_redis:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ------------------------------------------------------------------ #
+  # Наблюдаемость (профиль observability)
+  # ------------------------------------------------------------------ #
+  prometheus:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.monitoring
+    image: flashhunter/prometheus:latest
+    container_name: flashhunter-prometheus
+    profiles: ["observability"]
+    restart: unless-stopped
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - fh_prom:/prometheus
+    depends_on:
+      api:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: flashhunter-grafana
+    profiles: ["observability"]
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-flashhunter}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/flashhunter.json
+    volumes:
+      - fh_grafana:/var/lib/grafana
+      - ./infra/docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    depends_on:
+      - prometheus
+
+  # ------------------------------------------------------------------ #
+  # Edge-прокси (профиль edge): TLS-терминация, gzip, rate-limit на /login
+  # ------------------------------------------------------------------ #
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: flashhunter-nginx
+    profiles: ["edge"]
+    restart: unless-stopped
+    ports:
+      - "${EDGE_PORT:-80}:80"
+    volumes:
+      - ./infra/docker/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  fh_data:
+    name: flashhunter_data
+  fh_pg:
+    name: flashhunter_postgres
+  fh_ch:
+    name: flashhunter_clickhouse
+  fh_redis:
+    name: flashhunter_redis
+  fh_prom:
+    name: flashhunter_prometheus
+  fh_grafana:
+    name: flashhunter_grafana
