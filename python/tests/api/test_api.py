@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import io
-
 import pytest
+from eth_account import Account
 
 API = "/api/v1"
 
@@ -46,7 +45,9 @@ def test_runtime_config_api_validates_values(api_client) -> None:
     response = api_client.put(f"{API}/settings/config", json={"values": {"api_port": "not-a-port"}})
     assert response.status_code == 422
 
-    unsupported = api_client.put(f"{API}/settings/config", json={"values": {"jwt_secret": "must-not-be-editable-here"}})
+    unsupported = api_client.put(
+        f"{API}/settings/config", json={"values": {"jwt_secret": "must-not-be-editable-here"}}
+    )
     assert unsupported.status_code == 422
 
     mock_market = api_client.put(f"{API}/settings/config", json={"values": {"mock_market_data": True}})
@@ -393,12 +394,14 @@ def test_contract_deploy_simulated_without_foundry(api_client) -> None:
 
 def test_wallets_crud_key_and_sweep(api_client) -> None:
     """Кошелёк: создание, установка ключа (тело запроса), refill-план и сивип."""
+    private_key = "0x" + "cd" * 32
+    address = Account.from_key(private_key).address
     created = api_client.post(
         f"{API}/wallets",
         json={
             "name": "unit-hot",
-            "address": "0x" + "77" * 20,
-            "private_key": "0x" + "cd" * 32,
+            "address": address,
+            "private_key": private_key,
             "is_hot": True,
             "chain_scope": [1, 8453],
         },
@@ -413,9 +416,20 @@ def test_wallets_crud_key_and_sweep(api_client) -> None:
     assert any(item["id"] == wallet_id for item in body["items"])
     assert all("encrypted_key" not in item for item in body["items"])  # ключ наружу не уходит
 
-    key_body = api_client.post(f"{API}/wallets/{wallet_id}/key", json={"private_key": "0x" + "ab" * 32})
+    invalid_key = api_client.post(f"{API}/wallets/{wallet_id}/key", json={"private_key": "0x" + "ab" * 32})
+    assert invalid_key.status_code == 422
+
+    key_body = api_client.post(f"{API}/wallets/{wallet_id}/key", json={"private_key": private_key})
     assert key_body.status_code == 200
-    assert "ab••••" in key_body.json()["masked"] or key_body.json()["masked"].endswith("abab")
+    assert key_body.json()["masked"].endswith(private_key[-4:])
+
+    selected = api_client.post(f"{API}/settings/trading-wallet/{wallet_id}")
+    assert selected.status_code == 200
+    assert selected.json()["restart_required"] is True
+    assert any(
+        item["id"] == wallet_id and item["is_trading"]
+        for item in api_client.get(f"{API}/wallets").json()["items"]
+    )
 
     # ключ не должен приниматься как query-параметр (иначе утечёт в логи)
     assert api_client.post(f"{API}/wallets/{wallet_id}/key?private_key=0x{'ff' * 32}").status_code == 422

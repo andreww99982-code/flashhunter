@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from decimal import Decimal
-from typing import Any, get_args, get_origin, Literal
+from typing import Any, Literal, get_args, get_origin
 
 from eth_account import Account
 from fastapi import APIRouter, HTTPException, Request, status
@@ -15,9 +15,7 @@ from sqlalchemy import select
 from flashhunter.api.deps import CriticalUser, CurrentUser, SessionDep, service, write_audit
 from flashhunter.config.secrets import decrypt_secret, encrypt_secret, mask_secret
 from flashhunter.config.settings import Settings, get_settings
-from flashhunter.db.models import ApiKeyEncrypted, RiskLimit, Setting
-from flashhunter.db.models import Wallet
-from flashhunter.db.models import utcnow
+from flashhunter.db.models import ApiKeyEncrypted, RiskLimit, Setting, Wallet, utcnow
 from flashhunter.strategies.service import STRATEGY_CLASSES
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -200,9 +198,7 @@ async def get_runtime_config(user: CurrentUser, db: SessionDep) -> dict[str, Any
                 "value": None if secret else _field_value(value),
                 "configured": bool(masked) if secret else True,
                 "masked": mask_secret(masked) if secret and masked else None,
-                "choices": list(get_args(field.annotation))
-                if _config_kind(field) == "select"
-                else [],
+                "choices": list(get_args(field.annotation)) if _config_kind(field) == "select" else [],
                 "description": field.description or "",
             }
         )
@@ -231,7 +227,10 @@ async def update_runtime_config(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "no settings provided")
     unknown = set(payload.values) - (set(Settings.model_fields) - _CONFIG_EXCLUDED)
     if unknown:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"unsupported settings: {', '.join(sorted(unknown))}")
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"unsupported settings: {', '.join(sorted(unknown))}",
+        )
     try:
         candidate = _settings_with_overrides(payload.values)
     except (ValueError, TypeError) as exc:
@@ -241,7 +240,11 @@ async def update_runtime_config(
     stored = dict(row.value or {}) if row else {}
     for name in payload.values:
         value = _field_value(getattr(candidate, name))
-        stored[name] = {"encrypted": encrypt_secret(str(value))} if _config_secret(name, Settings.model_fields[name]) else value
+        stored[name] = (
+            {"encrypted": encrypt_secret(str(value))}
+            if _config_secret(name, Settings.model_fields[name])
+            else value
+        )
     if row is None:
         row = Setting(key="runtime_config", value=stored)
         db.add(row)
@@ -261,16 +264,22 @@ async def set_trading_wallet(
     if wallet is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "wallet not found")
     if not wallet.is_hot or not wallet.encrypted_key:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "trading wallet must be hot and have a private key")
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "trading wallet must be hot and have a private key"
+        )
     if get_settings().live_chain_id not in (wallet.chain_scope or []):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "wallet is not enabled for the active chain")
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "wallet is not enabled for the active chain"
+        )
     try:
         private_key = decrypt_secret(wallet.encrypted_key)
         derived_address = Account.from_key(private_key).address
     except Exception as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "wallet private key is invalid") from exc
     if derived_address.lower() != wallet.address.lower():
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "wallet address does not match its private key")
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "wallet address does not match its private key"
+        )
     setting = await db.get(Setting, "trading_wallet")
     if setting is None:
         db.add(Setting(key="trading_wallet", value={"wallet_id": wallet.id}))

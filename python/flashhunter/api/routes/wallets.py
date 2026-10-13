@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import Any
 
+from eth_account import Account
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
-from eth_account import Account
 
 from flashhunter.api.deps import CriticalUser, CurrentUser, SessionDep, service, write_audit
 from flashhunter.config.secrets import encrypt_secret, mask_secret
@@ -53,7 +52,9 @@ def _validate_wallet_key(address: str, private_key: str) -> None:
     except Exception as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "invalid private key") from exc
     if derived_address.lower() != address.lower():
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "wallet address does not match its private key")
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "wallet address does not match its private key"
+        )
 
 
 @router.get("")
@@ -96,7 +97,9 @@ async def create_wallet(
     payload: WalletCreate, request: Request, user: CriticalUser, db: SessionDep
 ) -> dict[str, Any]:
     """Добавляет кошелёк. Приватный ключ шифруется (Vault/KMS в prod, локально — AES-подобно)."""
-    existing = (await db.execute(select(Wallet).where(Wallet.address == payload.address))).scalar_one_or_none()
+    existing = (
+        await db.execute(select(Wallet).where(Wallet.address == payload.address))
+    ).scalar_one_or_none()
     if existing is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "wallet with this address already exists")
     if payload.private_key:
